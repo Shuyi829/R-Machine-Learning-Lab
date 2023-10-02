@@ -1,0 +1,248 @@
+---
+title: "Lab02"
+author: "Shuyi Chen"
+date: "2023-08-02"
+output: html_document
+---
+
+# Import
+```{bash eval=TRUE}
+# 1. Use the curl command in unix to download the result into the file akl.json. 
+curl -o akl.json "https://archive-api.open-meteo.com/v1/archive?latitude=-36.8485&longitude=174.7633&start_date=1980-01-01&end_date=2023-06-30&daily=temperature_2m_max,temperature_2m_min&timezone=Pacific%2FAuckland"
+```
+
+
+```{r}
+# 2. Read the result into an R object jd.
+# Load the jsonlite package
+library(jsonlite)
+
+# Read the JSON file into an R object
+jd <- fromJSON("akl.json")
+
+# Print the structure of the jd object
+str(jd)
+```
+
+# Clean
+```{r}
+# 3. Create a data frame d with the columns day, min and max from the object jd.
+# Extract the required columns from jd
+day <- as.Date(jd$daily$time, format = "%Y-%m-%d")
+min <- jd$daily$temperature_2m_min
+max <- jd$daily$temperature_2m_max
+
+# Create the data frame
+d <- data.frame(day = day, min = min, max = max)
+
+# Print the structure of the d data frame
+str(d)
+```
+
+# Explore
+```{r}
+# 4. Check if the data is complete. Verify the sanity of the data.
+# Check if there are missing values
+any_missing <- any(is.na(d))
+missing_min <- any(is.na(d$min))
+missing_max <- any(is.na(d$max))
+# Print the results
+cat("Missing values in the entire data frame:", any_missing, "\n")
+cat("Missing values in the 'min' column:", missing_min, "\n")
+cat("Missing values in the 'max' column:", missing_max, "\n")
+# Conclusion: There is no missing value in this data frame.
+
+# Check for data consistency
+inconsistent_data <- any(d$min > d$max)
+cat("inconsistent_data:",inconsistent_data,"\n")
+# Conclusion: There is no inconsistent data in this data frame.
+
+# Compute summary statistics for min and max temperature
+summary(d$min)
+summary(d$max)
+# Conclusion: The min and max temperature data are within reasonable ranges.
+
+# Plot the min and max temperature over time
+plot(d$day, d$min, type = "l", xlab = "Date", ylab = "Min Temperature (°C)", main = "Min Temperature over Time")
+plot(d$day, d$max, type = "l", xlab = "Date", ylab = "Max Temperature (°C)", main = "Max Temperature over Time")
+# Conclusion: There are not apparent distinct patterns or outliers in two plots.
+```
+
+The brief description of the data:
+The given dataset contains comprehensive weather data for a specific location in New Zealand. It includes essential attributes such as latitude, longitude, generation time, UTC offset, timezone, elevation, and daily weather information. The daily weather information comprises the date, maximum temperature (in degrees Celsius), and minimum temperature (in degrees Celsius) spanning from January 1, 1980, to the present.
+
+The dataset is well-structured as a list with numeric values for coordinates and elevation, ensuring consistency and accuracy. The "daily_units" list further confirms that the time and temperature measurements are appropriately recorded. Additionally, the "daily" list contains arrays of dates along with corresponding maximum and minimum temperatures.
+
+One remarkable aspect of this dataset is the absence of missing values, making it reliable and suitable for analysis. Moreover, there are no apparent inconsistencies or distinct patterns that might indicate outliers or anomalies. The minimum temperatures range from 5 to 20 degrees Celsius, while the maximum temperatures span from 10 to 25 degrees Celsius.
+
+This dataset provides valuable insights into the weather patterns and temperature trends for the specified location. Researchers and analysts can use this data to explore various weather-related phenomena and conduct further investigations over time.
+
+# Model
+```{r}
+# 5. We want to focus on the evolution of yearly average temperatures over time. In order to do that, let us define a daily mean estimate by taking the average of the minimum and maximum each day. 
+
+# Calculate daily mean estimate
+d$mean_temp <- (d$min + d$max) / 2
+
+# Extract year from the day column
+d$year <- as.integer(format(d$day, "%Y"))
+
+# Calculate yearly average temperatures
+avg <- aggregate(mean_temp ~ year, data = d, mean)
+
+# Show the avg
+str(avg)
+
+# Use years 1980-2014 as training set and remaining data as a test set. Fit two models to the training data: a simple overall mean and a linear regression model with the year as a predictor variable. Print the models and compute RMSE for the test set. Plot all the data and predictions.
+
+# Filter training data (years 1980-2014) and test data (years 2015-2023)
+training_data <- subset(avg, year >= 1980 & year <= 2014)
+test_data <- subset(avg, year >= 2015)
+
+# Fit the overall mean model
+overall_mean_model <- mean(training_data$mean_temp)
+
+# Fit the linear regression model
+linear_model <- lm(mean_temp ~ year, data = training_data)
+
+# Print the models
+cat("Overall Mean Model:",overall_mean_model,"\n")
+print("Linear Regression Model:")
+print(linear_model)
+
+# Compute RMSE for the test set
+test_data$overall_mean_pred <- overall_mean_model
+test_data$linear_model_pred <- predict(linear_model, newdata = test_data)
+
+# Compute RMSE function
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
+
+rmse_overall_mean <- rmse(test_data$mean_temp, test_data$overall_mean_pred)
+rmse_linear_model <- rmse(test_data$mean_temp, test_data$linear_model_pred)
+
+cat("RMSE for the Overall Mean Model:",rmse_overall_mean,"\n")
+cat("RMSE for the Linear Regression Model:",rmse_linear_model)
+
+# Plot the data and predictions
+plot(avg$year, avg$mean_temp, type = "p", col = "blue", xlab = "Year", ylab = "Yearly Average Temperature",
+     main = "Yearly Average Temperature over Time")
+points(test_data$year, test_data$overall_mean_pred, col = "red", pch = 16)
+points(test_data$year, test_data$linear_model_pred, col = "green", pch = 17)
+
+# Add a legend to the plot
+legend("topright", legend = c("Data", "Overall Mean Prediction", "Linear Model Prediction"),
+       col = c("blue", "red", "green"), pch = c(1, 16, 17), cex = 0.8)
+```
+
+Do you see a problem in the test set? Explain it (use R code to provide evidence for your hypothesis), propose a way to handle it, implement it using R and repeat the model validation. Comment on the suitability of the two models.
+
+I found that the actual average annual temperature from 2015 to 2023 was much higher than the test data predicted by both models. This discrepancy might be attributed to global climate warming, which is beyond the scope of the training data (years 1980-2014). It indicates that the linear regression model and the overall mean model might not be capturing the effects of climate change on the temperature trend.
+To address this issue and potentially account for climate change effects, we can enhance the linear regression model by incorporating a time-related predictor variable that represents the number of years from the starting year (1980). This variable can help capture the long-term trend in temperature over time, including the potential influence of climate change.
+
+```{r}
+# Create the time-related predictor variable
+training_data$time <- training_data$year - 1980
+
+# Define the cross-validation folds manually
+num_folds <- 5
+folds <- cut(seq(1, nrow(training_data)), breaks = num_folds, labels = FALSE)
+
+# Function to calculate RMSE
+calculate_rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
+
+# Perform cross-validation
+fold_rmse <- numeric(num_folds)
+for (fold in 1:num_folds) {
+  # Split the data into training and test sets
+  train_data <- subset(training_data, folds != fold)
+  test_data <- subset(training_data, folds == fold)
+  
+  # Fit the linear regression model
+  lm_model <- lm(mean_temp ~ year + time, data = train_data)
+  
+  # Make predictions on the test set
+  test_data$lm_pred <- predict(lm_model, newdata = test_data)
+  
+  # Calculate RMSE for this fold
+  fold_rmse[fold] <- calculate_rmse(test_data$mean_temp, test_data$lm_pred)
+}
+
+# Calculate the mean RMSE across all folds
+mean_rmse <- mean(fold_rmse)
+
+# Print the cross-validation results and compare it with overall mean method
+cat("RMSE for the Overall Mean Model:",rmse_overall_mean,"\n")
+cat("RMSE for the Linear Regression Model:",rmse_linear_model,"\n")
+cat("RMSE for the CV Enhanced Linear Model:",fold_rmse)
+```
+
+The cross-validated enhanced linear regression model with a time-related predictor performs best, showing lower RMSE and capturing long-term trends and climate change effects in yearly average temperatures compared to the other simpler models.
+
+# Revisit
+```{r}
+# 6. You have found a data source listing all notable cities in New Zealand in a table: https://stat.auckland.ac.nz/~su/769/demo/nzcities.html. Write R code that reads the html page into R and extracts the contained table into a data frame cities (Hint: use XPath to find the <table> elements).
+
+# Load necessary libraries
+library(rvest)
+library(httr)
+
+# Read the HTML page and extract the table
+url <- "https://stat.auckland.ac.nz/~su/769/demo/nzcities.html"
+webpage <- read_html(url)
+cities_table <- html_table(html_nodes(webpage, "table")[[1]], fill = TRUE)
+cities <- as.data.frame(cities_table)
+str(cities)
+
+# Filter the most populous 5 cities and get their coordinates
+most_populous_cities <- cities[order(-cities$population), ][1:5, ]
+lat <- most_populous_cities$lat
+lng <- most_populous_cities$lng
+start_date <- "2022-01-01"
+end_date <- "2022-12-31"
+
+# Create the url to fetch the maximum daily temperatures for the most populous 5 cities for the period from 2022-01-01 to 2022-12-31 from the Open Meteo API and plot the result
+
+url_cities <- paste0("https://archive-api.open-meteo.com/v1/archive?","latitude=",lat,"&longitude=",lng,"&start_date=",start_date,"&end_date=",end_date,"&daily=temperature_2m_max","&timezone=Pacific/Auckland") 
+
+# Create a data frame to store the URLs and corresponding city names
+json_data <- lapply(url_cities, fromJSON)
+
+# Combine the JSON data into a data frame
+df_cities <- do.call(rbind, Map(function(region, data) {
+  data.frame(region = region,
+             date = data$daily$time,
+             max_temp = data$daily$temperature_2m_max,
+             stringsAsFactors = FALSE)
+}, seq_along(json_data), json_data))
+
+# Create a plot
+
+# Create a color palette for the lines
+line_colors <- c("black", "red", "LawnGreen", "skyblue", "Turquoise")
+
+# Plot the data
+plot(as.Date(df_cities$date),df_cities$max_temp,xlab = "Day", ylab = "max. temperature",type = "n",ylim = c(5, 30))
+df_list <- split(df_cities, df_cities$region)
+for (i in seq_along(df_list)) {
+  region_data <- df_list[[i]]
+  lines(as.Date(region_data$date), region_data$max_temp, col = line_colors[i], lwd = 1)
+}
+
+# Add a legend
+legend("bottomleft", legend = most_populous_cities$city, col = line_colors, lwd = 1, cex = 0.8)
+```
+
+# Summary
+In this discussion, we explored weather data for Auckland, New Zealand, obtained from the Open Meteo API. We analyzed the daily temperature trends, computed yearly average temperatures, and compared three models: overall mean, linear regression, and an enhanced linear regression model with a time-related predictor.
+
+The enhanced linear regression model outperformed the others, suggesting that it better captures temperature trends over time. However, we observed a potential issue with the test set, as the actual temperatures for 2015-2023 were higher than predicted. This discrepancy may be due to climate change, which is not fully accounted for in the training data (1980-2014).
+
+To address this, we improved the model by incorporating a time-related predictor. This allowed us to capture long-term trends and consider the impact of climate change on temperature patterns. The updated model provided more accurate predictions.
+
+Additionally, we retrieved temperature data for the five most populous cities in New Zealand and plotted their maximum daily temperatures for 2022. This visualization offered insights into temperature variations among the cities.
+
+Overall, our analysis emphasizes the importance of considering external factors like climate change when building predictive models. The enhanced linear regression model proved more suitable for capturing long-term temperature trends and improving predictions.

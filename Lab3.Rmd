@@ -1,0 +1,163 @@
+---
+title: "Lab03"
+author: "Shuyi Chen"
+date: "2023-08-08"
+output: html_document
+---
+
+Enter in my own directory in advance
+cd /course/users/sche796/lab-3
+
+1. Use a shell command to determine how long it takes to decompress the fhvhv_tripdata_2023-01.csv.bz2 data file and count how many lines it has.
+```{bash eval=FALSE}
+# Check how many csv files in the fhvhv directory 
+ls -l /course/data/nyctaxi/csv/fhvhv | grep ^- | wc -l
+48
+
+# Check how many csv files for the year 2020
+ls -l /course/data/nyctaxi/csv/fhvhv | grep 2020 | wc -l
+12
+
+# Use the time command to measure the time when the command is executed, use bzip2-dk to extract the.bz2 file and use wc-l to count the lines
+time bunzip2 -c /course/data/nyctaxi/csv/fhvhv/fhvhv_tripdata_2023-01.csv.bz2 | wc -l
+18479032
+
+real	1m25.251s
+user	1m23.811s
+sys	0m10.784s
+```
+
+
+There are 18479032 lines in fhvhv_tripdata_2023-01.csv.bz2, and it takes 1m25.222s to decompress it. Since there are 12 files in 2020, it may take 12 * 1m25.222s =  1022.664s, about 17m3s to decompress; there are 48 files in the fhvhv directory, so it may take 48 x 1m25.222s = 4092.576s to decompress.
+
+
+2. Use a shell command to count the number of lines in each compressed file for year 2020 all in parallel, write those sizes into a file sizes-2020.txt and measure the time it took to run this command. Make sure the output sizes are in time order, i.e., the first line in sizes-2020.txt is the number of records for January 2020, second for February 2020 etc. How does the run time compare to your estimate from the previous question? Comment on the result.
+```{bash eval=TRUE}
+# Start the timer
+time (
+    # Run the decompression and count operations in parallel for each file
+    for month in {01..12}; do
+        (bunzip2 -c /course/data/nyctaxi/csv/fhvhv/fhvhv_tripdata_2020-$month.csv.bz2 | wc -l > tmp-$month.txt) &
+    done
+    # Wait for all background tasks to complete
+    wait
+    # Merge temporary file contents chronologically into sizes-2020.txt
+    cat tmp-{01..12}.txt > sizes-2020.txt
+    # Delete the temporary file
+    rm tmp-{01..12}.txt
+)
+```
+
+
+For this time, it takes aroud 2 minutes to decompress all the 2020 csv files, which takes much less time than estimated decompress time(17m3s). We can conclude that Using the parallel command can greatly improve the speed of data processing, especially when multiple processor cores are available. Since multiple files are being processed at the same time, the overall execution time should be much less than the total time required to process each file separately.
+
+
+3. We want to see if we can estimate the number of records in a compressed file based on its size. Use R and the file sizes-2020.txt you generated in the previous question to predict the number of records for each file in the directory. Helpful functions in R are Sys.glob() and file.info() to get the names and sizes of the files. Compute the RMSE for the training dataset (year 2020) and interpret its value - do you think your model is good? Draw the training data and your model in a plot.
+
+```{r eval=TRUE}
+library(graphics)
+
+# 1. Read the data
+record_counts <- read.table("sizes-2020.txt", header = FALSE)[,1]
+file_sizes_2020 <- file.info(Sys.glob("/course/data/nyctaxi/csv/fhvhv/fhvhv_tripdata_2020-*.csv.bz2"))$size
+
+# 2. Linear Regression Model
+model <- lm(record_counts ~ file_sizes_2020)
+
+# 3. Compute RMSE
+predictions <- predict(model)
+RMSE <- sqrt(mean((predictions - record_counts)^2))
+cat("RMSE for training data:", RMSE, "\n")
+
+# Interpretation: A lower RMSE indicates better performance. The RMSE here is 48569.55, which is relatively low, the model may be considered good.
+
+# 4. Predict records for all files in the directory
+all_files <- Sys.glob("/course/data/nyctaxi/csv/fhvhv/*.csv.bz2")
+all_file_sizes <- file.info(all_files)$size
+all_predictions <- predict(model, newdata = data.frame(file_sizes_2020 = all_file_sizes))
+
+# 5. Compare prediction for January 2023 with the actual
+jan_2023_predicted <- all_predictions[grepl("48", names(all_predictions))]
+cat("Predicted records for January 2023:", jan_2023_predicted, "\n")
+
+# The estimated value for January 2023 is 18358127, which is close to the actual value 18479032, suggesting that the model is quite good.
+
+# Plotting
+plot(file_sizes_2020, record_counts, main = "Training Data and Linear Model", xlab = "File Size", ylab = "Number of Records", pch = 16)
+abline(model, col = "blue")
+```
+
+
+The model is good from the RMSE and the slight difference between the estimated value of January 2023 and the ture value. Also, from the plot we can clearly see the linear pattern between record counts and file sizes.
+
+4. Plot the number of trips per month over time based on the predictions obtained in the last question. Interpret the result.
+```{r eval=TRUE}
+months <- seq(as.Date("2019-02-01"), as.Date("2023-01-01"), by="month")
+df <- data.frame(months, all_predictions)
+# Plot
+plot(df$all_predictions ~ df$months, type="l", xlab="Month", ylab="Predicted Number of Trips", main="Predicted Number of Trips Over Time", col="blue", lwd=2)
+```
+
+
+As can be seen from the graph, the number of tourism has been fluctuating in the past four years. In early 2020, due to covid-19, the number of tourism fell sharply for a short period of time, and then gradually recovered. However, due to the impact of the epidemic and the economic recession, the tourism data after 2020 has not recovered to the state of 2019 before the epidemic, although it has risen in fluctuations
+
+
+
+5. Use a shell command to extract the field hvfhs_license_num and calculate the distribution of the number of trips per vendor for the months 2020-03 and 2021-03. How did it change in the one year?
+```{bash eval=FALSE}
+# For 2020-03
+bunzip2 -c /course/data/nyctaxi/csv/fhvhv/fhvhv_tripdata_2020-03.csv.bz2 | awk -F" " 'NR > 1 {count[$1]++} END {for (vendor in count) print vendor, count[vendor]}' > 2020-03-vendor-counts.txt
+
+# For 2021-03
+bunzip2 -c /course/data/nyctaxi/csv/fhvhv/fhvhv_tripdata_2021-03.csv.bz2 | awk -F" " 'NR > 1 {count[$1]++} END {for (vendor in count) print vendor, count[vendor]}' > 2021-03-vendor-counts.txt
+```
+
+
+How did the distribution of the number of trips per vendor change in the one year?
+
+To explain the difference between the two months of data more clearly, we first listed the change in the number of trips per vendor:
+
+Vendor Trips in 2020.3 | Vendor Trips in 2021.3 | Number of Trips changes | Percentage change
+
+
+HV0003 | 9,836,781 | 10,173,376   | +336,595  | +3.42%
+
+
+HV0004 | 336,606   | 107, 314     | -229, 292 | -68.13%
+
+
+HV0005 | 3,219,541 | 3,946,703    | +727,162  | +22.58%
+
+
+From the table above, we can draw the following conclusions:
+
+HV0003: From 2020 to 2021, the number of trips from this vendor increased by about 3.42%. That means it saw a slight increase in business during the year.
+
+HV0004: The number of trips from this vendor in 2021 decreased by 68.13% compared to 2020, which is a significant decrease. This could mean that this vendor faced some challenges during the year like Covid-19, or that there could be other competitive factors causing its business to decline.
+
+HV0005: This vendor increased the number of trips by 22.58% from 2020 to 2021. That's a sizable increase, suggesting it may have increased its business or expanded its market share during that period.
+
+In summary, during the year, the number of trips for both HV0003 and HV0005 increased while the number of trips for HV0004 decreased significantly. This may reflect changes in market dynamics, reconfiguration of competitive relationships, or differences in the internal management strategies of individual vendors. Further data and market analysis may be needed to gain insight into the reasons behind it.
+
+
+
+6. Write a summary of your findings.
+
+To gauge the impact of events like the COVID-19 pandemic on travel, we analyzed vendor trip data from 2020 and 2021.
+
+Key Insights:
+
+Travel Patterns:
+The pandemic drastically reduced travel in early 2020. Recovery was seen in subsequent months but varied among vendors. HV0005's trips grew by 22.58% from 2020 to 2021, while HV0004 saw a 68.13% decline.
+
+Vendor Analysis:
+Some vendors, like B02510, dominated in trip numbers and showed growth. However, the trajectory differed across vendors due to factors like travel restrictions easing, market strategies, and consumer behaviors.
+
+Data Predictions:
+Using R, we estimated record numbers from file sizes with significant accuracy, as shown by comparisons for January 2023 data.
+
+Efficiency in Data Handling:
+Utilizing parallel shell commands, we optimized data processing. For example, decompressing all 2020 csv files was achieved in just 1m49.957s, notably faster than our initial 17m3s estimate.
+
+Conclusion:
+Our study highlighted key travel trends post-pandemic and the importance of efficient data handling. Parallel processing proved crucial for time-effective data analysis.

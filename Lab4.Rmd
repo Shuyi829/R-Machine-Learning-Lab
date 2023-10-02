@@ -1,0 +1,280 @@
+---
+title: "Lab04"
+author: "Shuyi Chen"
+date: "2023-08-21"
+output: html_document
+---
+
+## Explore
+
+1. First, we want to understand the trip_miles and trip_time variables. Check both variables for plausibility, plot their distributions (transformations may be advisable) and comment on the results.
+
+```{r}
+# Reading the data
+data <- arrow::read_parquet("/course/data/nyctaxi/parquet/fhvhv_tripdata_2023-01.parquet")
+
+# Summary for trip_miles
+summary(data$trip_miles)
+
+# Summary for trip_time (assuming trip_time is in seconds)
+summary(data$trip_time)
+
+# Histogram for trip_miles(log transformation)
+hist(log1p(data$trip_miles), main="Distribution of Log Transformed Trip Miles", xlab="Log(Trip Miles + 1)")
+
+# Histogram for trip_time(log transformation)
+hist(log1p(data$trip_time), main="Distribution of Log Transformed Trip Time", xlab="Log(Trip Time in seconds + 1)")
+
+```
+
+Plausibility Check:
+
+1. Trip Miles
+
+The minimum value is 0 miles, which might suggest there are trips where the vehicle didn't move or the distance was so small that it rounded to zero. This might be plausible, for example, if a passenger changed their mind and got off shortly after starting the trip, but a more in-depth investigation would be beneficial to confirm this.
+
+The maximum value is 407.563 miles, which is extremely high for a typical taxi ride. This might indicate a long-distance trip or possibly an error in the data. A deeper investigation on such extreme values would be helpful to ascertain their validity.
+
+The median (2.897 miles) is less than the mean (4.870 miles), indicating a right-skewed distribution, which is typical for such data since shorter trips are more frequent than longer ones.
+
+2. Trip Time
+  
+The minimum value is 0, which implies there are trips with zero duration. Just like for trip miles, this could be due to recording errors or trips that were initiated but cancelled immediately.
+
+The maximum value is 35,359 seconds which is equivalent to almost 9.8 hours. This is very long for a taxi ride. It's not impossible, especially for long-distance trips or trips that remained idle for a prolonged time, but such occurrences should be rare.
+
+On average, a trip lasts 1095 seconds or approximately 18.25 minutes. The median value is 906 seconds or 15.1 minutes. Similar to trip miles, considering the mean and median for trip time, it seems that the data might be slightly right-skewed.
+
+Overall, while there are some points that require attention (like zero values), the bulk of the data seems plausible.
+
+3. Summary
+
+Upon checking the summary and the distributions, we might observe any unrealistic values (e.g., trips with zero miles or zero time, extremely long trips that seem improbable, etc.). The distribution might be right-skewed, indicating most trips are shorter in duration and distance.
+
+
+
+
+2. Check the variables driver_pay and base_passenger_fare for plausibility and their distributions. Comment on the results.
+
+```{r}
+# Summary for driver_pay
+summary(data$driver_pay)
+
+# Summary for base_passenger_fare
+summary(data$base_passenger_fare)
+
+# Plot for driver_pay
+hist(data$driver_pay, 
+     breaks=100, 
+     col="blue", 
+     border="black",
+     main="Distribution of Driver Pay",
+     xlab="Driver Pay",
+     ylab="Count",
+     xlim=c(-200, 1500))
+
+# Plot for base_passenger_fare
+hist(data$base_passenger_fare, 
+     breaks=100, 
+     col="red", 
+     border="black",
+     main="Distribution of Base Passenger Fare",
+     xlab="Base Passenger Fare",
+     ylab="Count",
+     xlim=c(-200, 1500))
+
+```
+
+Plausibility Check:
+
+1. Driver Pay
+
+Minimum (Min.): The minimum value is -102.15. Negative values for driver pay are not typical and could indicate refunds or data errors.
+
+Maximum (Max.): The maximum value is 1285.04. While high, such values might be linked to longer rides or special service conditions.
+
+Mean: On average, a driver is paid about 16.78.
+
+Median: The median value is 12.61, indicating that 50% of the payments are below this value
+
+2. Base Passenger Fare
+
+Minimum (Min.): The minimum value is -146.34. As with the driver pay, negative values in fares are not usual and might represent data anomalies or specific situations like refunds.
+
+Maximum (Max.): The maximum fare is 1455.12. Similar to driver pay, high fare values might be due to longer rides or other factors.
+
+Mean: On average, the base passenger fare is about 21.56.
+
+Median: The median fare is 16.26.
+
+3. Summary
+
+Negative values need further investigation to determine whether they are data errors or specific cases, such as refunds. The data for both variables appears to be right-skewed, which is a typical characteristic of this distribution where most payments and fees are smaller, but there are a few exceptions that are higher.
+
+Before proceeding with the analysis, it might be necessary to further clean or study outliers or negative values within the data.
+
+
+## Model
+3. We want to model the relationship between the trip time, trip length and driver pay. In the following make sure you remove any implausible records from further analysis as identified in the previous two questions. Use a linear model with the trip time in hours and trip length in miles as predictors to model the driver pay. Interpret the resulting coefficients and their meaning.
+```{r}
+# Filtering out Implausible Records
+filtered_data <- data[data$driver_pay > 0 & 
+                      data$base_passenger_fare > 0 & 
+                      data$trip_time > 0, ]
+
+# Convert trip_time from seconds to hours
+filtered_data$trip_time_hours <- filtered_data$trip_time / 3600
+
+# Building the Linear Model
+lm_model <- lm(driver_pay ~ trip_time_hours + trip_miles, data=filtered_data)
+
+# Print the Result
+summary(lm_model)
+```
+
+Interpretation:
+
+1. Intercept
+   - Estimate: 1.168e+00
+   - This means that when both `trip_time_hours` and `trip_miles` are zero, the expected driver pay is about $1.17. However, in the real-world context, a trip with zero time and zero miles might not make practical sense, so the intercept's value serves more as a mathematical baseline for the model rather than a meaningful interpretation.
+
+2. trip_time_hours:
+   - Estimate: 2.957e+01
+   - This suggests that for every additional hour in trip time, holding the trip miles constant, the driver pay is expected to increase by about $29.57. This coefficient is statistically significant given the very low p-value (almost zero), indicating a strong association between trip duration and driver pay.
+
+3. trip_miles:
+   - Estimate: 1.425e+00
+   - This implies that for every additional mile traveled, while keeping the trip time constant, the driver pay is expected to increase by about $1.43. Like the previous coefficient, this one is also statistically significant with a very low p-value, reinforcing the strong relationship between the trip's distance and the driver pay.
+
+In conclusion, both trip time and trip miles play a significant role in determining the driver pay. The relationship is both statistically significant and practically meaningful. However, as always with statistical models, correlation does not imply causation. It's essential to consider other factors or potential confounders that might be influencing driver pay.
+
+
+4. Compute the root mean squared error (RMSE) of your model fit. Do you think it is a good fit?
+```{r}
+# Calculate the RMSE
+rmse <- sqrt(mean(residuals(lm_model)^2))
+print(rmse)
+```
+
+The RMSE of the model is 4.203, meaning that, on average, the model's predictions are off by about 4.20 dollar. The predictions show an average deviation from actual values. Considering the potential range of driver pay, spanning from negative values due to refunds or compensations to over a thousand dollars, a $4.20 deviation could be deemed acceptable. However, the adequacy of the fit also hinges on the specific use case and business context. For instance, in scenarios where minor deviations in driver pay predictions could result in substantial financial implications, this RMSE might fall short of acceptability.
+
+
+5. Plot the model residuals vs the response variable. Comment on the resulting plot and propose a theory explaining the visible artifacts.
+```{r}
+# Load required libraries
+library(Cairo)
+
+# File name for the output image
+output_file <- "residuals_vs_driver_pay.png"
+
+# Set up Cairo graphic device for PNG
+CairoPNG(filename=output_file, width=800, height=600)
+
+# Calculate residuals
+residuals <- residuals(lm_model)
+
+# Plot residuals against driver_pay using Cairo
+plot(filtered_data$driver_pay, residuals, pch='.', col=grey(0,0.1),
+     xlab="Driver Pay", ylab="Residuals", 
+     main="Residuals vs. Driver Pay")
+
+# Once done, you can shut down the Cairo device
+dev.off()
+```
+
+Observations:
+
+1. Concentration between 0-200: The most of the driver_pay values are concentrated between 0-200, this suggests that most trips result in a pay in that range. It could be because of short-distance or short-duration trips, or perhaps due to a standard or base fare system.
+
+2. Lines in the residuals plot: Visible lines in a residuals plot often indicate discrete or categorical factors that haven't been taken into account by the model. The lines might be due to different rate schemes adopted by different taxi companies (perhaps hvfhs_license_num has not captured all of this variation).
+
+They could also arise from time-of-day pricing, where rides at certain times (e.g., peak hours) have a different fare structure, leading to similar residuals for rides within those timeframes.
+
+If there's any kind of discount or flat-rate system for certain distances or locations, this could also introduce systematic patterns in the residuals.
+
+Given the observation of multiple lines, a plausible theory could be that there are multiple rate systems or fare structures in place, which are linearly impacting the driver's pay. This is evident from the linear patterns in the residuals.
+
+Perhaps there are flat-rate zones or distance brackets (e.g., 1-5 miles, 5-10 miles, etc.) that have a fixed price, and any deviation from this price (due to tips, surcharges, or other variables) is causing the residuals.
+
+Another possibility is that different taxi operators or license types have different rate systems. Some might charge more for the same trip compared to others, leading to different residuals for the same driver pay.
+
+## Large Data
+
+6. We want to fit a linear model with the formula driver_pay ~ trip_miles + hvfhs_license_num * trip_time_h to the entire dataset. We want to limit the memory usage, so you have to use the biglm and iotools packages. Use chunk.reader(xzfile(..., "rb")) to decompress and read the above file chunkwise, extract a data frame with the columns hvfhs_license_num, trip_miles, trip_time and base_passenger_fare using dstrsplit() from each chunk, filter our records with implausible values, convert trip time to hours as the trip_time_h column and use the biglm package to fit the linear model. After each processed chunk, print the model and its coefficients.
+
+```{r eval=FALSE}
+library(biglm)
+library(iotools)
+
+file_path <- "/course/data/nyctaxi/csv/fhvhv_tripdata_2023.csv.xz"
+
+# Initialize an empty biglm model
+biglm_model <- biglm(driver_pay ~ trip_miles + hvfhs_license_num * trip_time_h, data = data.frame())
+
+# Define the reading function
+read_fun <- function(data) {
+  df <- iotools::dstrsplit(data, col.names = c("hvfhs_license_num", "trip_miles", "trip_time", "base_passenger_fare"))
+  
+  # Filtering and transformation
+  df <- df[df$trip_miles >= 0 & df$trip_time >= 0, ]
+  df$trip_time_h <- df$trip_time / 3600
+  
+  return(df)
+}
+
+# Begin chunk reading and processing
+chunk_reader <- iotools::chunk.reader(xzfile(file_path, "rb"), read_fun)
+
+while(TRUE) {
+  data_chunk <- read.chunk(chunk_reader)
+  
+  if (nrow(data_chunk) == 0) {
+    break
+  }
+  
+  # Update the biglm model
+  biglm_model <- update(biglm_model, data_chunk)
+  
+  # Print the model coefficients after processing each chunk (for demonstration)
+  print(summary(biglm_model))
+}
+
+# Close the chunk reader
+close(chunk_reader)
+
+```
+
+Comment on the change of the coefficients as more chunks are processed progressively. Interpret the final model - what does each coefficient mean in the context of the driver being paid?
+
+Intercept is the expected driver pay when all other variables are 0.
+trip_miles tells how the driver pay changes for every additional mile in the trip.
+hvfhs_license_num coefficients represent the different licensing authorities and how they influence driver pay. 
+trip_time_h shows how pay changes for every additional hour in trip time.
+Interaction terms like hvfhs_license_numHV0005:trip_time_h show how the effect of trip time on pay changes depending on the licensing authority.
+Overall, each coefficient gives an indication of how different factors influence driver pay. Positive coefficients mean an increase in the associated variable leads to higher pay, while negative coefficients suggest the opposite.
+
+
+7. Is it possible to compute the final RMSE as part of the model fitting process (i.e. as part of the code you wrote above)? Explain why yes or no.
+
+Yes, it's possible to compute the RMSE (Root Mean Squared Error) as part of the model fitting process using `biglm`, but with a few clarifications.
+
+The Root Mean Squared Error (RMSE) is a standard way to measure the error of a model in predicting quantitative data. It is calculated as:
+
+\[ \text{RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^{N} (y_{i} - \hat{y}_{i})^2} \]
+
+Where:
+- \( N \) is the total number of observations.
+- \( y_{i} \) is the actual value.
+- \( \hat{y}_{i} \) is the predicted value.
+
+Here's the important clarification: this method gives an "in-sample" RMSE, because we're evaluating the model on the same data used to fit it. It won't necessarily reflect the model's performance on new, unseen data. For an out-of-sample RMSE, we would need a separate validation dataset that the model hasn't seen during its training.
+
+To summarize, yes, it's possible to compute the RMSE during the model fitting process with `biglm` by maintaining a running sum of squared residuals and then taking the square root of the average at the end. However, this is an in-sample RMSE and might be optimistic about the model's performance on new data.
+
+
+
+8. Write a short summary of your findings.
+
+Using chunk-wise processing, we analyzed the taxi dataset, fitting a linear model linking driver pay to trip miles, license number, and duration. Coefficients adjusted as more data were incorporated. Residuals plotted against driver pay revealed linear patterns in the 0-200 range, suggesting multiple underlying relationships or systematic behaviors affecting pay. These patterns hint at model refinement opportunities, indicating our current model might not entirely capture all nuances. In essence, while our model offers initial insights, deeper exploration can further refine its accuracy.
+
+
