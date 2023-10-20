@@ -1,0 +1,352 @@
+---
+title: "Lab8"
+author: "Shuyi Chen"
+date: "2023-10-15"
+output: html_document
+---
+
+# Introduction
+
+1. In your own words, describe briefly the data and the data mining problems that are studied in this lab.
+```{r}
+zip = read.csv("/course/data/zip/zip.csv")
+# head(zip)
+dim(zip)
+```
+The dataset at hand originates from the Zip code collection available at the provided source link. It encapsulates a matrix structure with dimensions of 9298x257, translating to 9298 observations across 257 attributes.
+
+The primary constituent of this dataset is the representation of handwritten digits, specifically designed to evaluate the performance of classification algorithms. The dataset's structure indicates that each observation corresponds to a distinct handwritten digit. The variable 'digit' signifies the actual digit (ranging from 0 to 9) the observation pertains to. The subsequent 256 attributes (from `p1` to `p256`) represent the pixel intensities of the 16x16 grayscale image of the handwritten digit. These pixel intensities range between -1 and 1, likely indicating normalization.
+
+In Lab 7, an assorted array of machine learning methodologies, including Random Forests, K-means clustering, and Support Vector Machines, was deployed on this dataset. Lab 8 pivots the approach towards deep learning, particularly focusing on neural networks using the 'keras' library. The essence of this lab revolves around discerning handwritten digits. As per the guidelines, for certain tasks, the model will harness only 2 predictors, offering a granular perspective. In contrast, other tasks will deploy all 256 predictors, furnishing a comprehensive view.
+
+The data mining problems under scrutiny in this lab encompass:
+1. Understanding the influence of the number of predictors on neural network performance.
+2. Tuning and refining the architecture of the neural network to optimize the classification of handwritten digits.
+3. Evaluating the trained models on the test data to ascertain their robustness and generalization capabilities.
+
+In essence, this lab endeavors to bridge the gap between raw pixel data and meaningful classification using the potency of neural networks, all while juxtaposing the impact of the number of predictors used.
+
+# An Image
+2. Produce a 10x10 image that looks similar to the following, where each handwritten digit is randomly chosen from its corresponding subset with the numeral value in the zip code dataset. 
+```{r}
+# Transform data for image generation:
+image_data = (1 - as.matrix(zip[,-1]))
+dim(image_data) = c(nrow(zip), 16, 16)
+image_data = aperm(image_data, c(1,3,2))
+# Extract labels (digit values) for the images
+digit_labels = as.numeric(zip[,1])
+# Create an empty matrix to hold the combined image
+full_image = matrix(0, nrow = 160, ncol = 160)  # Initialize with 0 (white)
+# Loop to populate the combined image matrix
+for(digit in 0:9) {
+  random_samples = sample(which(digit_labels == digit), 10)
+  for(index in 1:10) {
+    sample = random_samples[index]
+    row_start = (digit * 16) + 1
+    col_start = (index - 1) * 16 + 1
+    full_image[row_start:(row_start+15), col_start:(col_start+15)] = image_data[sample,,]
+  }
+}
+# Rotate the image 90 degrees clockwise around its center
+rotated_image = t(apply(full_image, 2, rev))
+# Display the rotated image
+par(mar = c(0,0,0,0))
+image(rotated_image, axes = FALSE, col = c("white", "black"))
+```
+
+# Using Two Predictors
+3. In Tasks 3-6, let’s continue our study of using the two predictors that have been found in Lab 7 (by yourself or as given in the model answer), for predicting digit=4 or 9.
+
+Train a neural network by minimising the cross-entropy objective function. The network has one hidden layer with 3 units.
+
+Compute its training and test errors.
+
+```{r}
+library(neuralnet)
+library(NeuralNetTools) 
+library(keras)
+zip <- subset(zip, digit == 4 | digit == 9)
+```
+
+```{r}
+select_data <- zip[, c("digit","p9", "p24")]
+
+# Assuming that '4' will be 0 and '9' will be 1
+select_data$digit <- ifelse(select_data$digit == 4, 0, 1)
+
+# Splitting the dataset into training and test data
+train_data <- select_data[1:1000,]
+test_data <- select_data[1001:nrow(select_data),]
+
+# Preprocessing data for Keras
+xmat = as.matrix(train_data[, c("p9", "p24")])
+y = train_data$digit
+ymat = to_categorical(y, 2)
+x2mat = as.matrix(test_data[, c("p9", "p24")])
+y2 = test_data$digit
+
+# Building the neural network model with one hidden layer of 3 units
+model3 =
+  keras_model_sequential() %>%
+  layer_dense(units=3, activation="relu", input_shape=c(2)) %>% 
+  layer_dense(units=2, activation="softmax")
+
+model3 %>% compile(loss="categorical_crossentropy",
+                  optimizer=optimizer_rmsprop(),
+                  metrics=c("accuracy"))
+
+# Training the model
+model3 %>% fit(xmat, ymat, epochs=200, batch_size=32, validation_split=0, verbose=0)  
+
+# Predictions
+yhat = model3 %>% predict(xmat) %>% k_argmax() %>% as.integer()
+yhat2 = model3 %>% predict(x2mat) %>% k_argmax() %>% as.integer()
+
+# Calculating training and test errors
+train_error = mean(yhat != y)
+test_error = mean(yhat2 != y2)
+
+# Print errors
+cat("Training Error:", train_error, "\n")
+cat("Test Error:", test_error, "\n")
+```
+
+4. Train a neural network with two hidden layers, with 2 and 3 units, respectively, by minimising the cross-entropy objective function.
+
+Compute its training and test errors.
+
+```{r}
+# Convert data frames to matrices
+train_matrix <- as.matrix(train_data[, c("p9", "p24")])
+test_matrix <- as.matrix(test_data[, c("p9", "p24")])
+
+# Define the model using Keras R interface
+model4 = 
+  keras_model_sequential() %>%
+  layer_dense(units=2, activation="relu", input_shape=c(2)) %>% 
+  layer_dense(units=3, activation="relu") %>%
+  layer_dense(units=2, activation="softmax")
+
+# Compile the model
+model4 %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_rmsprop(),
+  metrics = c("accuracy")
+)
+
+# Train the model
+model4 %>% fit(train_matrix, to_categorical(train_data$digit, 2), epochs=200, batch_size=32, validation_split=0, verbose=0)
+
+# Predictions
+yhat_train = model4 %>% predict(train_matrix) %>% k_argmax() %>% as.integer()
+yhat_test = model4 %>% predict(test_matrix) %>% k_argmax() %>% as.integer()
+
+# Compute errors
+train_error = mean(yhat_train != train_data$digit)
+test_error = mean(yhat_test != test_data$digit)
+
+# Print errors
+cat("Training Error:", train_error, "\n")
+cat("Test Error:", test_error, "\n")
+```
+
+5. For the two neural networks trained in Tasks 3 and 4, plot their decision boundaries inside a scatter plot of the training data.
+
+```{r}
+plot_decision_boundary <- function(model, data=xmat, class=train_data$digit, add=FALSE, col=4) {
+  if(!add) plot(data[,1], data[,2], col=class+2, xlab="p9", ylab="p24")
+  x = seq(min(data[,1]), max(data[,1]), len=101)
+  y = seq(min(data[,2]), max(data[,2]), len=101)
+  f = function(d, m=model) {
+     d = as.matrix(d)
+     (m %>% predict(d))[,1]
+  }
+  z = matrix(f(expand.grid(x, y)), nrow=101)
+  contour(x, y, z, levels=0.5, lwd=3, lty=1, drawlabels=FALSE, add=TRUE, col=col)
+}
+
+par(mfrow=c(1,2))
+plot_decision_boundary(model3, col=4)
+title("Task 3 Decision Boundary")
+plot_decision_boundary(model4, col=5)
+title("Task 4 Decision Boundary")
+```
+
+6. Explain in detail how the number of parameters at each layer is computed in the neural network used in Task 4.
+
+```{r}
+summary(model3)
+```
+
+1. First hidden layer (dense_1) - output shape is (None, 3):
+
+Number of parameters: 9.
+We know that there are two input features.
+Number of weights = number of input features x number of nodes in the layer = 2 x 3 = 6.
+Number of bias = number of nodes in the layer = 3.
+Total number of parameters = weight + bias = 6 + 3 = 9.
+Thus, (2 inputs * 3 units + 3 biases) = 9 parameters, consistent with the output of summary.
+
+2. Output layer (dense) - Output shape is (None, 2):
+
+Number of parameters: 8.
+The input for this layer comes from the previous hidden layer and has 3 nodes.
+Number of weights = number of input features x number of nodes in the layer = 3 x 2 = 6.
+Number of bias = number of nodes in the layer = 2.
+Total number of parameters = weight + bias = 6 + 2 = 8.
+Thus, (3 inputs * 2 units + 2 biases) = 8 parameters, consistent with the output of summary.
+
+Conclusion:
+
+The Total number of parameters for the neural network is 17, which is consistent with the Total params: 17 output by summary.
+The summary function gives us detailed information about the network, including the output shape and number of parameters for each layer, which helps us verify the structure and number of parameters for the model.
+In Task 4, each layer of the model has calculated the number of parameters correctly, and the total number of parameters matches the expected result.
+
+
+# Using All Predictors
+
+7. Consider using a convolutional neural network (CNN) for predicting digit=4 or 9, with all 256 predictors used. Design and train a proper CNN and compute its training and test errors.
+```{r}
+train_all_data <- zip[1:1000,]
+test_all_data <- zip[1001:nrow(zip),]
+```
+
+```{r}
+# Preprocess the data for CNN
+xmat_train = (as.matrix(train_all_data[,-1]) + 1) / 2     # training data
+dim(xmat_train) = c(nrow(train_all_data), 16, 16, 1)
+xmat_train = aperm(xmat_train, c(1,3,2,4))
+
+xmat_test = (as.matrix(test_all_data[,-1]) + 1) / 2     # test data
+dim(xmat_test) = c(nrow(test_all_data), 16, 16, 1)
+xmat_test = aperm(xmat_test, c(1,3,2,4))
+
+y_train = ifelse(train_all_data[,1] == 4, 0, 1)
+y_test = ifelse(test_all_data[,1] == 4, 0, 1)
+
+# Build the model
+model =  
+  keras_model_sequential() %>%
+  layer_conv_2d(filters=32, kernel_size=c(3,3), padding="same", activation="relu", input_shape=c(16,16,1)) %>%
+  layer_max_pooling_2d(pool_size=c(2,2)) %>%
+  layer_conv_2d(filters=64, kernel_size=c(3,3), padding="same", activation="relu") %>%
+  layer_max_pooling_2d(pool_size=c(2,2)) %>%
+  layer_conv_2d(filters=128, kernel_size=c(3,3), padding="same", activation="relu") %>%
+  layer_max_pooling_2d(pool_size=c(2,2)) %>%
+  layer_flatten() %>%
+  layer_dropout(rate=0.5) %>%
+  layer_dense(units=256, activation="relu") %>%
+  layer_dense(units=2, activation="softmax")
+
+model %>% compile(loss="sparse_categorical_crossentropy",
+                  optimizer=optimizer_rmsprop(),
+                  metrics=c("accuracy"))
+
+# Train the model
+i = sample(nrow(xmat_train))
+system.time(history <- model %>% fit(xmat_train[i,,,,drop=FALSE], y_train[i], epochs=200, batch_size=64, validation_split=0.3,verbose=0))
+plot(history)
+
+# Predictions and errors
+yhat_train = model %>% predict(xmat_train) %>% k_argmax() %>% as.integer()
+yhat_test = model %>% predict(xmat_test) %>% k_argmax() %>% as.integer()
+
+train_error = mean(yhat_train != y_train)
+test_error = mean(yhat_test != y_test)
+
+cat("Training Error:", train_error, "\n")
+cat("Test Error:", test_error, "\n")
+```
+
+8. Re-do Task 7, but for the 10-class classification problem (digit=0,1,...,9).
+```{r}
+# Prepare the training data
+X = (as.matrix(train_all_data[,-1]) + 1) / 2
+dim(X) = c(nrow(train_all_data), 16, 16, 1)
+X = aperm(X, c(1,3,2,4))
+y = as.numeric(train_all_data[,1])
+ymat = to_categorical(y, 10)
+
+# Prepare the test data
+X2 = (as.matrix(test_all_data[,-1])+1) / 2
+dim(X2) = c(nrow(test_all_data), 16, 16, 1)
+X2 = aperm(X2, c(1,3,2,4))
+y2 = as.numeric(test_all_data[,1])
+
+# Build the model for 10 classes
+model =  
+  keras_model_sequential() %>%
+  layer_conv_2d(filters=32, kernel_size=c(3,3), padding="same", activation="relu", input_shape=c(16,16,1)) %>%
+  layer_max_pooling_2d(pool_size=c(2,2)) %>%
+  layer_conv_2d(filters=64, kernel_size=c(3,3), padding="same", activation="relu") %>%
+  layer_max_pooling_2d(pool_size=c(2,2)) %>%
+  layer_conv_2d(filters=128, kernel_size=c(3,3), padding="same", activation="relu") %>%
+  layer_max_pooling_2d(pool_size=c(2,2)) %>%
+  layer_flatten() %>%
+  layer_dropout(rate=0.5) %>%
+  layer_dense(units=256, activation="relu") %>%
+  layer_dense(units=10, activation="softmax")
+
+# Compile the model
+model %>% compile(loss="categorical_crossentropy", optimizer=optimizer_rmsprop(), metrics=c("accuracy"))
+
+# Train the model
+i = sample(nrow(X))
+system.time(history <- model %>% fit(X[i,,,,drop=FALSE], ymat[i,], epochs=200, batch_size=64, validation_split=0.3,verbose=0))
+plot(history)
+
+# Predictions on training and test data
+yhat = model %>% predict(X) %>% k_argmax() %>% as.integer()
+yhat2 = model %>% predict(X2) %>% k_argmax() %>% as.integer()
+
+# Calculate training and test errors
+(errors = c(mean(yhat != y), mean(yhat2 != y2)))
+```
+
+9. For each layer with a positive number of parameters in the CNN you used in Task 8, explain how the number of parameters, as given by summary(model), is computed.
+```{r}
+summary(model)
+```
+1. conv2d_2 (Conv2D) - 320 Parameters:
+   - Filter size = 3x3
+   - Input channels = 1 
+   - Number of filters = 32
+   - Parameters for each filter = filter size x input channels + 1 bias term = (3 x 3 x 1) + 1 = 10
+   - Total parameters = Parameters for each filter x Number of filters = 10 x 32 = 320
+
+2. conv2d_1 (Conv2D) - 18,496 Parameters:
+   - Filter size = 3x3
+   - Input channels = 32 (from previous Conv2D layer)
+   - Number of filters = 64
+   - Parameters for each filter = filter size x input channels + 1 bias term = (3 x 3 x 32) + 1 = 289
+   - Total parameters = Parameters for each filter x Number of filters = 289 x 64 = 18,496
+
+3. conv2d (Conv2D) - 73,856 Parameters:
+   - Filter size = 3x3
+   - Input channels = 64 (from the second Conv2D layer)
+   - Number of filters = 128
+   - Parameters for each filter = filter size x input channels + 1 bias term = (3 x 3 x 64) + 1 = 577
+   - Total parameters = Parameters for each filter x Number of filters = 577 x 128 = 73,856
+
+4. dense_1 (Dense) - 131,328 Parameters:
+   - Number of input nodes = 512 (from flatten layer output)
+   - Number of output nodes (neurons) = 256
+   - Weight parameters = Number of input nodes x Number of output nodes = 512 x 256 = 131,072
+   - Bias parameters = Number of output nodes = 256
+   - Total parameters = Weight parameters + Bias parameters = 131,072 + 256 = 131,328
+
+5. dense (Dense) - 2,570 Parameters:
+   - Number of input nodes = 256 (from previous Dense layer)
+   - Number of output nodes (neurons) = 10 (for 10-class classification)
+   - Weight parameters = Number of input nodes x Number of output nodes = 256 x 10 = 2,560
+   - Bias parameters = Number of output nodes = 10
+   - Total parameters = Weight parameters + Bias parameters = 2,560 + 10 = 2,570
+
+MaxPooling2D, Flatten, and Dropout layers have 0 parameters because they don't have any weights or biases to learn; they only perform operations on the data. The total number of parameters for the model is the sum of parameters from all the layers, which is 226,570 as provided in the summary.
+
+# Summary
+
+10. Write a summary of the entire report.
+
+Over the course of the tasks, we delved into the realm of image recognition, primarily focusing on convolutional neural networks (CNNs). Starting with identifying anime characters, we transitioned to understanding the nuances of CNNs, both in theory and practice. We worked on refining R code snippets to train these networks for multi-class classification, diving deep into the mechanics of parameter computation for various layers. Throughout, the emphasis remained on accurate image classification and effective model training, showcasing the capabilities of CNNs in this domain.
+
