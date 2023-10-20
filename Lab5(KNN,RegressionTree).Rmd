@@ -1,0 +1,495 @@
+---
+title: "Lab5"
+author: "Shuyi Chen"
+date: "2023-09-24"
+output: html_document
+---
+
+# Introduction
+
+1. In your own words, describe briefly the data and the practical problem that is associated with the data.
+
+
+```{r}
+# Read the CSV
+Abalone <- read.csv("/course/data/abalone/abalone.csv", stringsAsFactors =TRUE)
+Abalone2 = transform(Abalone, class=cut(rings, c(0,8,12,Inf), include=TRUE))
+Abalone2[sample(nrow(Abalone), 10),]     # to randomly show 10 observations
+```
+**Description of the Data and Associated Practical Problem:**
+
+The Abalone dataset, sourced from the UCI Machine Learning Repository, primarily pertains to the physical measurements of abalones, marine mollusks that inhabit rocky coastlines. The dataset includes various features such as the sex (M, F, or I [infant]), length, diameter, height, whole weight, shucked weight (weight of the meat), viscera weight (gut weight after bleeding), and shell weight. A key variable, 'rings', indicates the age of the abalone, which can be derived by adding 1.5 to the number of rings.
+
+In the context of this dataset, the practical problem revolves around predicting the age of abalones based on these physical measurements. Age determination is typically done by cutting the shell and counting the number of rings through a microscope, a tedious and time-consuming process. If accurate predictions can be made using the available measurements, it could simplify age determination, benefiting both marine biology studies and the seafood industry.
+
+The dataset provided has been split into training and testing sets, with 1000 observations for training and 3177 for testing. Additionally, to adapt the dataset for classification tasks, the 'rings' variable has been transformed into a categorical variable 'class', segmenting the abalones into age groups: [0,8], (8,12], and (12,Inf].
+
+From the displayed random sample of 10 observations, we can discern the various features of individual abalones and their corresponding age classes. This forms the foundation for our subsequent predictive modeling tasks.
+
+
+# Classification and Data Resampling
+
+2. For the training and test sets, compute the confusion matrix and misclassification rate, using, respectively:
+
+  Linear discriminant analysis
+  The Naive Bayes method
+
+```{r}
+# Split the data into training and testing sets
+train_data <- Abalone2[1:1000, ]
+test_data <- Abalone2[1001:nrow(Abalone2), ]
+
+# Linear Discriminant Analysis (LDA)
+library(MASS)
+
+# Fit the model
+lda_model <- lda(class ~ . - rings, data = train_data)
+
+# Predict on training set for LDA
+lda_train_pred <- predict(lda_model, newdata = train_data)
+
+# Training Confusion Matrix for LDA
+lda_train_confusion <- table(train_data$class, lda_train_pred$class)
+print("LDA Training Confusion Matrix:")
+print(lda_train_confusion)
+
+# Training Misclassification rate for LDA
+lda_train_misclass_rate <- 1 - sum(diag(lda_train_confusion)) / sum(lda_train_confusion)
+cat("LDA Training Misclassification Rate:", lda_train_misclass_rate, "\n")
+
+# Predict on test set for LDA
+lda_test_pred <- predict(lda_model, newdata = test_data)
+
+# Testing Confusion Matrix for LDA
+lda_test_confusion <- table(test_data$class, lda_test_pred$class)
+print("LDA Testing Confusion Matrix:")
+print(lda_test_confusion)
+
+# Testing Misclassification rate for LDA
+lda_test_misclass_rate <- 1 - sum(diag(lda_test_confusion)) / sum(lda_test_confusion)
+cat("LDA Testing Misclassification Rate:", lda_test_misclass_rate, "\n")
+
+# Naive Bayes Method
+library(e1071)
+
+# Fit the model
+nb_model <- naiveBayes(class ~ . - rings, data = train_data)
+
+# Predict on training set for Naive Bayes
+nb_train_pred <- predict(nb_model, newdata = train_data)
+
+# Training Confusion Matrix for Naive Bayes
+nb_train_confusion <- table(train_data$class, nb_train_pred)
+print("Naive Bayes Training Confusion Matrix:")
+print(nb_train_confusion)
+
+# Training Misclassification rate for Naive Bayes
+nb_train_misclass_rate <- 1 - sum(diag(nb_train_confusion)) / sum(nb_train_confusion)
+cat("Naive Bayes Training Misclassification Rate:", nb_train_misclass_rate, "\n")
+
+# Predict on test set for Naive Bayes
+nb_test_pred <- predict(nb_model, newdata = test_data)
+
+# Testing Confusion Matrix for Naive Bayes
+nb_test_confusion <- table(test_data$class, nb_test_pred)
+print("Naive Bayes Testing Confusion Matrix:")
+print(nb_test_confusion)
+
+# Testing Misclassification rate for Naive Bayes
+nb_test_misclass_rate <- 1 - sum(diag(nb_test_confusion)) / sum(nb_test_confusion)
+cat("Naive Bayes Testing Misclassification Rate:", nb_test_misclass_rate, "\n")
+
+```
+
+When analyzing the Abalone dataset, we employed two classification methods: Linear Discriminant Analysis (LDA) and the Naive Bayes method. For the training set, LDA achieved a misclassification rate of 27.4%. In contrast, the Naive Bayes method resulted in a slightly higher misclassification rate of 36%.
+
+Moving to the testing set, the LDA method exhibited a misclassification rate of 29.8%, whereas the Naive Bayes approach showed a notably higher rate of 42.3%.
+
+From these results, it's evident that LDA outperformed the Naive Bayes method for both training and testing datasets. The disparity in the performance of the two methods on the testing data, in particular, underscores the relative robustness of LDA for this specific dataset. While both methods offer valuable insights, careful consideration should be given when choosing an approach, as the performance can vary depending on the nature and intricacies of the dataset at hand.
+
+
+
+3. In order to use the K-nearest-neighbour (KNN) method, we need to convert any categorical variable (factor) into dummy binary ones and should also better standardise each variable (to have mean 0 and variance 1). This can be achieved as follows: X = scale(model.matrix(class ~ . - rings, data=Abalone2)[,-1])   # standardised design matrix
+
+Compute the training and test misclassification rates for K=1,2,…,30.
+
+[It would be more meaningful to standardise the training set only and then scale the test set accordingly. However, since the difference in the results should be minor, let’s keep it simple by standardising the entire data set.]
+
+```{r}
+# standardised design matrix
+X = scale(model.matrix(class ~ . - rings, data=Abalone2)[,-1])   
+
+library(class)
+
+# Split the standardized data into training and testing sets
+X_train <- X[1:1000, ]
+X_test <- X[1001:nrow(Abalone2), ]
+y_train <- Abalone2$class[1:1000]
+y_test <- Abalone2$class[1001:nrow(Abalone2)]
+
+# Initialize vectors to store training and testing misclassification rates
+training_misclass_rates <- numeric(30)
+testing_misclass_rates <- numeric(30)
+
+# For each k from 1 to 30, perform KNN and compute misclassification rates
+for (k in 1:30) {
+  # For training misclassification rate
+  knn_train_pred <- knn(train = X_train, test = X_train, cl = y_train, k = k)
+  train_confusion_matrix <- table(y_train, knn_train_pred)
+  train_misclass_rate <- 1 - sum(diag(train_confusion_matrix)) / sum(train_confusion_matrix)
+  training_misclass_rates[k] <- train_misclass_rate
+  
+  # For testing misclassification rate
+  knn_test_pred <- knn(train = X_train, test = X_test, cl = y_train, k = k)
+  test_confusion_matrix <- table(y_test, knn_test_pred)
+  test_misclass_rate <- 1 - sum(diag(test_confusion_matrix)) / sum(test_confusion_matrix)
+  testing_misclass_rates[k] <- test_misclass_rate
+}
+
+# Print the misclassification rates for K=1,2,...,30
+cat("Training misclassification rates:\n")
+print(training_misclass_rates)
+
+cat("\nTesting misclassification rates:\n")
+print(testing_misclass_rates)
+```
+
+For K=1, the training misclassification rate is 0, which is expected because each training observation's nearest neighbour is itself. As K increases, the training misclassification rate gradually rises, indicating a decrease in model fit to the training data.
+On the testing dataset, the misclassification rate is at its lowest when K is around 7, after which it fluctuates but generally trends upwards.
+
+The KNN method, with its simplicity and ease of implementation, performed reasonably well on the Abalone2 dataset. However, its performance can vary significantly with different values of K.
+
+A proper selection of K is crucial for achieving good model performance. Cross-validation or other model validation techniques can be employed to find the optimal  K value.
+
+The results also underscore the importance of evaluating a model's performance not just on the training data but also on a separate testing dataset. This ensures that we get a realistic understanding of the model's predictive capabilities.
+
+4. Use 10-fold cross-validation (CV), with 20 repetitions, to compute the CV misclassification rates of KNN for K(=1,2,…,30) over the training set. Make sure you used the technique of same (sub)samples, and explain why you did.
+
+Show in one graph the curve for these misclassification rates, along with the two curves for those obtained in Task 3. Make sure these curves are visually distinguishable, e.g., by using different line types, point types and/or colours.
+
+What is the appropriate value of K we should use for this data set based on the CV results?
+```{r}
+n <- nrow(X_train)
+K <- 30  # Maximum value of K
+R <- 20  # Number of repetitions
+M <- 10  # M-fold CV
+
+test.set <- function(i, n, K=10) {
+  (round((i-1)/K*n)+1):round(i/K*n)
+}
+
+pe <- matrix(nrow=R*M, ncol=K)  # pre-allocate space for misclassification rates
+
+set.seed(769)  # for reproducibility
+
+for(i in 1:R) {  # for each repetition
+  ind <- sample(n)
+  for(j in 1:M) {  # for each fold
+    index <- ind[test.set(j, n, M)]
+    test_X <- X_train[index, ]
+    test_y <- y_train[index]
+    train_X <- X_train[-index, ]
+    train_y <- y_train[-index]
+    for(k in 1:K) {  # for each k nearest neighbours (method)
+      yhat <- knn(train=train_X, test=test_X, cl=train_y, k=k)  # prediction for test data
+      pe[M*(i-1)+j,k] <- mean(yhat != test_y)  # misclassification rate for test data
+    }
+  }
+}
+
+pe_mean <- colMeans(pe)
+plot(1:K, pe_mean, type="l", xlab="k", ylab="Misclassification Rate", col="red", ylim=c(0, max(pe_mean)), main="KNN Misclassification Rates Using 10-fold CV with 20 Repetitions")
+lines(1:K, testing_misclass_rates, col="blue")
+lines(1:K, training_misclass_rates, col="green")
+legend("topright", legend=c("CV", "Task 3 Testing", "Task 3 Training"), col=c("red", "blue", "green"), lty=1, pch=1)
+
+best_k <- which.min(pe_mean)
+cat("Based on the CV results,", best_k, "is the appropriate value of K we should use for this data set.")
+```
+
+
+Based on the CV results,K=18 is identified as the optimal value. This suggests that considering the 18 nearest neighbors provides a balance between bias and variance, resulting in the lowest misclassification rate on validation sets.
+
+Initially, the misclassification rate for the training dataset from Task 3 is considerably low, indicating a good fit to the training data. This is expected, especially for small values of K, as the model is more flexible and can fit closely to the training data, potentially even capturing noise.
+The CV and Task 3 testing misclassification rates start high but decline as K increases. This suggests that the model's generalization improves with increasing K values.
+
+After K=10, all three curves (CV, Task 3 training, and Task 3 testing) stabilize. However, the testing misclassification rate remains higher than the other two, indicating that while the model fits the training data and the CV splits well, it doesn't generalize as effectively to entirely unseen data.
+
+
+5. Use the Jackknifing technique (with a 90% for training and 10% for validation) to find an appropriate value of K (=1,2,…,30) for KNN. Use R = 200 repetitions. Make sure you used the technique of same (sub)samples.
+
+Plot the curve of the misclassification rates you obtained from Jackknifing.
+
+```{r}
+# Number of repetitions and values of K
+R <- 200
+K_values <- 1:30
+
+# Store the misclassification rates for each K and repetition
+misclass_rates <- matrix(0, nrow=length(K_values), ncol=R)
+
+# Set random seed for reproducibility
+set.seed(123)
+
+# For each repetition
+for (r in 1:R) {
+  # Create a random permutation of the data
+  indices <- sample(1:nrow(X_train))
+  # Split indices into 10 roughly equal parts
+  folds <- split(indices, cut(indices, breaks=10, labels=FALSE))
+  # For each subset
+  for (k in 1:10) {
+    # Treat the kth subset as validation and the rest as training
+    validation_indices <- folds[[k]]
+    training_indices <- unlist(folds[-k])
+    # For each value of K (for KNN)
+    for (K in K_values) {
+      knn_pred <- knn(train = X_train[training_indices, ], 
+                     test = X_train[validation_indices, ], 
+                     cl = y_train[training_indices], 
+                     k = K)
+      confusion_matrix <- table(y_train[validation_indices], knn_pred)
+      misclass_rate <- 1 - sum(diag(confusion_matrix)) / sum(confusion_matrix)
+      misclass_rates[K, r] <- misclass_rate
+    }
+  }
+}
+
+# Compute the average misclassification rate for each K
+avg_misclass_rates <- rowMeans(misclass_rates)
+
+# Plot the results
+plot(K_values, avg_misclass_rates, type="l", 
+     xlab="K Value", ylab="Misclassification Rate", 
+     main="Jackknifing Misclassification Rate")
+
+best_k <- which.min(avg_misclass_rates)
+cat(best_k)
+```
+
+The Jackknifing technique, along with the repetition, provides a robust assessment of KNN's performance across a spectrum of K values. The variability observed in the misclassification rates reinforces the necessity of these validation techniques.
+
+The result that K=14 is the optimal value is an important takeaway. Such a result, derived from thorough validation, can significantly enhance the model's real-world performance.
+
+While the graph offers invaluable insights, it's essential to remember that the ideal K value might vary if the data changes or if a different validation technique is employed. Hence, such analyses should be revisited as and when the underlying data or the model's context changes.
+
+
+6. Rewrite/reorganise your code so that each repetition can be carried out independently. Perform the Jackknifing selection of K
+ (=1,2,…,30) using parallel computing, with function mclapply().
+
+Compare the running times, with 1, 5, 10 or 20 cores used (you have to do this on a VM).
+```{r}
+library(parallel)
+
+# Define a function to carry out the Jackknifing for one repetition
+jackknifing_rep <- function(rep_num) {
+  K_values <- 1:30
+  misclass_rates <- numeric(length(K_values))
+  
+  indices <- sample(1:nrow(X_train))
+  folds <- split(indices, cut(indices, breaks=10, labels=FALSE))
+  
+  for (k in 1:10) {
+    validation_indices <- folds[[k]]
+    training_indices <- unlist(folds[-k])
+    
+    for (K in K_values) {
+      knn_pred <- knn(train = X_train[training_indices, ], 
+                     test = X_train[validation_indices, ], 
+                     cl = y_train[training_indices], 
+                     k = K)
+      confusion_matrix <- table(y_train[validation_indices], knn_pred)
+      misclass_rate <- 1 - sum(diag(confusion_matrix)) / sum(confusion_matrix)
+      misclass_rates[K] <- misclass_rates[K] + misclass_rate
+    }
+  }
+  misclass_rates / 10
+}
+
+# Set random seed for reproducibility
+set.seed(123)
+
+# Compare running times for different numbers of cores
+num_cores <- c(1, 5, 10, 20)
+for (cores in num_cores) {
+  start_time <- Sys.time()
+  results <- mclapply(1:R, jackknifing_rep, mc.cores=cores)
+  end_time <- Sys.time()
+  cat(sprintf("Time taken with %d core(s): %s seconds\n", cores, round(difftime(end_time, start_time, units="secs"))))
+}
+
+# Average the misclassification rates across all repetitions
+avg_misclass_rates <- rowMeans(do.call("cbind", results))
+
+# Print the average misclassification rates for each K
+print(avg_misclass_rates)
+```
+
+Parallel computing proves to be a potent tool, especially for iterative and computationally intensive tasks like cross-validation. The dramatic decrease in running time makes it an attractive approach, especially when working with larger datasets or more complex models.
+
+
+The consistent misclassification rates, irrespective of the parallelization, vouch for the robustness of the approach.
+
+
+A point to consider for further exploration would be the overhead cost of parallelization as we increase the number of cores beyond an optimal point. This experiment nicely demonstrates that sometimes throwing more computational resources might not always be the best strategy; understanding the intricacies of the task and the computation can lead to more efficient outcomes.
+
+
+
+# Regression Trees
+
+7. Fit an unpruned regression tree with rpart (using cp=0.005) to the Abalone data and plot it (as clearly as you can, by adjusting the dimension of the diagram in your R Markdown file).
+
+Identify the four most important splits in the unpruned tree, and explain why they are.
+
+```{r}
+# Loading necessary libraries
+library(rpart)
+set.seed(769)
+
+# Subset the first 1000 observations for training
+train_data <- Abalone[1:1000, ]
+
+# Using the 'rings' column as a response variable for regression tree
+(r <- rpart(rings ~ ., data=train_data, cp=0.005))
+
+# Customize the plot
+par(mar = c(1, 1, 1, 1)) # Adjust the plot margins
+plot(r, uniform = TRUE,
+     main="Unpruned Regression Tree",
+     branch=0.5,
+     margin=0.05,
+     compress=TRUE,
+     col="blue") 
+text(r, pretty=0, cex=0.8) # Adjust font size with cex
+
+# Extracting variable importance
+r$variable.importance
+
+```
+
+From the given output of `fit$variable.importance`, the four most important splits in the unpruned tree are:
+
+1. **Shell**: With an importance value of 19220.3714.
+2. **Whole**: With an importance value of 17235.2042.
+3. **Diameter**: With an importance value of 15385.1624.
+4. **Length**: With an importance value of 15221.0217.
+
+**Why are these splits important?**
+
+1. **Shell**: The shell's weight is the most significant in determining the age (rings) of the abalone, which makes intuitive sense as the shell would grow as the abalone ages.
+2. **Whole**: The whole weight of the abalone is the second most crucial factor. An older abalone would generally be expected to weigh more.
+3. **Diameter**: The diameter of the abalone shell can indicate the age of the abalone. A more extensive diameter usually corresponds to an older age.
+4. **Length**: Similarly, the length of the abalone, representing its size, would naturally correlate with its age.
+
+These four predictors, as suggested by their importance values, are crucial in determining the age of the abalone, which is why they are the top splits in the regression tree. The tree algorithm found that using these variables to split the data resulted in the largest reductions in variance (or error) relative to other predictors.
+
+8. Find the solutions to the following questions from the unpruned tree (without using code).
+
+
+  1. What is the variation (TSS) reduction by the split at the root node?
+
+The total sum of squares (TSS) at the root is 10553.98000.
+After the split at the root node, we have two child nodes:
+The left child (node 2) with a deviance of 1657.08400.
+The right child (node 3) with a deviance of 5744.22700.
+The reduction in TSS due to this split = root TSS - (left child TSS + right child TSS) = 10553.98000 - (1657.08400 + 5744.22700) = 3152.66900.
+
+
+  2. What is the predicted response value by the tree for the following observation?
+
+Given:
+sex      = M
+length   = 0.57
+diameter = 0.48
+height   = 0.18
+whole    = 0.9395
+shucked  = 0.399
+viscera  = 0.2
+shell    = 0.410
+
+Starting at the root:
+
+shell< 0.189: Since 0.410 is not less than 0.189, we move to the right child (node 3).
+At node 3 (shell>=0.189):
+
+shell< 0.44025: Since 0.410 is less than 0.44025, we move to the left child (node 6).
+At node 6 (shell< 0.44025):
+
+shucked>=0.30525: Since 0.399 is greater than 0.30525, we move to the left child (node 12).
+At node 12 (shucked>=0.30525):
+
+shell< 0.2895: Since 0.410 is not less than 0.2895, we move to the right child (node 25).
+At node 25 (shell>=0.2895):
+shucked>=0.43625: Since 0.399 is not greater than or equal to 0.43625, we move to the right child (node 51).
+At node 51 (shucked< 0.43625):
+shell< 0.36675: Since 0.410 is not less than 0.36675, we move to the right child (node 61).
+At node 61 (shell>=0.36675):
+This is a terminal node with a predicted response value (yval) of 17.222220.
+Thus, the predicted response value by the tree for the given observation is 17.222220.
+
+
+  3. In which hyper-rectangular region, the mean number of rings is the largest?
+
+
+Looking at the terminal nodes, the one with the highest yval (mean number of rings) is the node with a yval of 17.92308 (node 31). The hyper-rectangular region for this node can be identified by tracing back to the root node and noting down all the splitting conditions:
+shell >= 0.44025
+shucked < 0.68875
+shell >= 0.5225
+This region, defined by the above conditions, is where the mean number of rings is the largest according to the regression tree.
+
+
+
+
+
+
+9. Find the pruned tree, using 1 SE-rule, and plot it (as clearly as you can). Further, what did you find for the optimal value of the complexity parameter? What are the training and test errors (MSE), for the unpruned and pruned trees?
+
+```{r}
+# Use 1-SE rule
+imin = which.min(r$cptable[, "xerror"])         # row number with minimum CV error
+ise1 = which(r$cptable[, "xerror"] < r$cptable[imin, "xerror"] + r$cptable[imin, "xstd"])[1]                 # row number selected by 1-SE rule
+cp2 = r$cptable[ise1, 1]            # complexity paramater value
+cat("The complexity paramater value is:",cp2 ,"\n")
+r2 = prune(r, cp=cp2)                                 # pruned tree
+
+# Customize the plot
+par(mar = c(1, 1, 1, 1)) # Adjust the plot margins
+plot(r2, uniform = TRUE,
+     main="Pruned Regression Tree",
+     branch=0.5,
+     margin=0.05,
+     compress=TRUE,
+     col="blue") 
+text(r2, pretty=0, cex=0.8) # Adjust font size with cex
+
+# Predictions for unpruned tree
+unpruned_train_pred <- predict(r, Abalone[1:1000,])
+unpruned_test_pred <- predict(r, Abalone[1001:nrow(Abalone),])
+
+# Predictions for pruned tree
+pruned_train_pred <- predict(r2, Abalone[1:1000,])
+pruned_test_pred <- predict(r2, Abalone[1001:nrow(Abalone),])
+
+# MSE calculations
+unpruned_train_mse <- mean((unpruned_train_pred - Abalone$rings[1:1000])^2)
+unpruned_test_mse <- mean((unpruned_test_pred - Abalone$rings[1001:nrow(Abalone)])^2)
+
+pruned_train_mse <- mean((pruned_train_pred - Abalone$rings[1:1000])^2)
+pruned_test_mse <- mean((pruned_test_pred - Abalone$rings[1001:nrow(Abalone)])^2)
+
+print(paste("Unpruned train MSE:", unpruned_train_mse))
+print(paste("Unpruned test MSE:", unpruned_test_mse))
+print(paste("Pruned train MSE:", pruned_train_mse))
+print(paste("Pruned test MSE:", pruned_test_mse))
+```
+
+
+# Summary
+
+The Abalone dataset, sourced from the UCI Machine Learning Repository, comprises attributes related to abalone physical measurements, with the aim to predict the age of abalone from its physical measurements. The age of abalone is determined by the number of rings, a direct measure provided in the dataset.
+
+Our analysis began with data preprocessing, including standardization and the transformation of the continuous age variable into categories, making it suitable for classification tasks. Utilizing decision trees, we identified key attributes, notably the "shell weight", as pivotal in predicting the abalone age. An unpruned regression tree was first constructed, which provided in-depth insights but was susceptible to overfitting. To address this, we pruned the tree using a complexity parameter.
+
+The optimal complexity parameter was determined to be 0.00731 via a 1-SE rule. The mean squared error (MSE) was employed to gauge the model's performance. The unpruned tree exhibited a training MSE of 4.84 and a test MSE of 4.95. After pruning, the tree's performance slightly declined with a training MSE of 5.23 and a test MSE of 5.27. The increase in MSE for the pruned tree underscores a trade-off between model simplicity and predictive accuracy.
+
+In conclusion, the Abalone dataset provides valuable insights into age prediction using physical attributes. Decision trees, both pruned and unpruned, proved to be effective tools in this analysis, highlighting the significance of shell weight in predicting abalone age.

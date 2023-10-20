@@ -1,0 +1,467 @@
+---
+title: "Lab6"
+author: "Shuyi Chen"
+date: "2023-09-29"
+output: html_document
+---
+
+Loading necessary libraries
+```{r}
+# Loading necessary libraries
+library(rpart)
+library(randomForest)
+library(gbm)
+library(parallel)
+```
+
+
+# Introduction
+
+1. In your own words, describe briefly the data and the practical problem that is associated with the data.
+
+```{r}
+bank = read.csv("/course/data/bank/bank.csv", strings=TRUE)
+head(bank)
+str(bank)
+dim(bank)
+table(bank$y)
+```
+
+### Data Description
+
+The dataset "bank.csv" contains information about the bank's customers and details related to the current marketing campaign. It contains 4521 observations and 17 variables.
+
+Bank Customer Data:
+
+
+1. age: The age of the customer.
+2. job: Customer's occupation type, including management, technology, service and other 12 types.
+3. marital status: including married, divorced and single three states. Among them, "divorce" can be due to divorce or the death of a spouse.
+education: The client's educational background, including unknown, elementary, intermediate and advanced.
+4. default: Whether the customer has a credit default.
+5. balance: The average annual balance of the customer in Euros.
+6. housing: Whether the customer has a housing loan.
+7. Personal loan: Whether the customer has a personal loan.
+
+Data related to the last contact of the current activity:
+
+
+1. contact: Contact method of the customer, which can be unknown, telephone or mobile phone.
+2. day: Last contact day in the middle of the month.
+3. month: Last contact month of the year.
+4. duration: The duration of the last contact, in seconds.
+
+Other properties:
+
+
+1. Number of campaign contacts: The number of contacts made with this customer during this marketing campaign.
+2. Days since last Campaign (pdays): The number of days the customer has been contacted since the last campaign.
+3. Number of previous contacts (previous): Number of contacts with this customer prior to this event.
+4. The poutcome of the last marketing campaign: It can be unknown, other, failure or success.
+
+Output variable:
+
+
+Fixed Deposit (y): Whether the customer has subscribed to a fixed deposit.
+
+### The Practical Problem
+
+The practical problem this dataset is designed to solve is predicting whether a customer will subscribe to a time deposit from a bank. Through a customer's personal information, financial behavior, and past interactions with the bank, the bank wants to understand which customers are more likely to be interested in time deposits. This is important for banks as they can market to these potential fixed deposit customers more effectively, saving resources and improving conversion rates.
+
+# Classification Trees
+For the tasks below, any error mentioned below means a classification rate.
+
+2. Grow an unpruned tree that fits the training data perfectly. (No need to plot it, as it may be quite large).
+
+Consider pruning this tree using the cost-complexity criterion. Find the (absolute, not relative) deviance values of all the trees in the sequence of nested trees, along with the size of the trees (in terms of the number of leaf nodes). Explain why these values must be monotonically decreasing as the size of the tree increases?
+
+```{r}
+# Split the data into training and testing
+set.seed(796)
+train_data <- bank[1:1000, ]
+test_data <- bank[1001:nrow(bank), ]
+
+# Grow an unpruned tree
+(fit <- rpart(y ~ ., data=train_data,cp=0))
+names(fit)
+fit$cptable
+
+# Pruning using cost-complexity
+# Obtain the sequence of CP values
+cps <- fit$cptable[, "CP"]
+# Obtain corresponding tree sizes and absolute deviances
+tree_sizes <- fit$cptable[, "nsplit"] + 1  # Number of terminal nodes is nsplit + 1
+abs_deviances <- fit$cptable[, "rel error"] * nrow(train_data)
+data.frame(CP=cps, TreeSize=tree_sizes, AbsDeviance=abs_deviances)
+```
+
+Explanation:
+
+
+The cost-complexity pruning method introduces a complexity parameter (often denoted as cp) that controls a trade-off between the tree's size and its fit to the training data. Trees with a smaller cp value will be larger and will fit the training data better (lower deviance), while trees with a larger cp value will be smaller but may not fit the training data as well.
+
+
+As we increase the tree size, the tree will make more splits to accommodate the training data more closely, resulting in a decrease in deviance (i.e., better fitting to the data). This is why the deviance values must be monotonically decreasing as the size of the tree increases.
+
+
+However, a very large tree might overfit the training data and perform poorly on new, unseen data. Thus, by examining the trade-off between tree size and deviance, we can choose an optimal tree size that balances accuracy on training data with the tree's generalization capability.
+
+
+3. Consider pruning the unpruned tree obtained in Task 2, using the cost-complexity criterion.
+
+Find both the training and test errors of all the nested trees in the sequence. Show both error curves versus the size of the tree in one graph.
+```{r}
+# Prune the tree for each CP value
+pruned_trees <- lapply(fit$cptable[, "CP"], function(cp) {
+  prune(fit, cp = cp)
+})
+
+# Calculate training error for each pruned tree
+train_errors <- sapply(pruned_trees, function(tree) {
+  pred <- predict(tree, train_data, type = "class")
+  mean(pred != train_data$y)
+})
+
+# Calculate test error for each pruned tree
+test_errors <- sapply(pruned_trees, function(tree) {
+  pred <- predict(tree, test_data, type = "class")
+  mean(pred != test_data$y)
+})
+
+# Plot the error curves vs the complexity of the tree
+plot(tree_sizes, train_errors, type = "b", col = "blue", ylim = c(0.06, 0.13), 
+     xlab = "Size of the Tree", ylab = "Error", main = "Error vs. Size of the Tree")
+lines(tree_sizes, test_errors, type = "b", col = "red")
+legend("topright", legend = c("Training Error", "Test Error"), col = c("blue", "red"), lty = 1)
+```
+
+
+4. Consider pruning the tree using 10-fold cross-validation with 20 repetitions (in aid of parallel computing using 20 cores) for the purpose of minimising the deviance (the Gini index by default). You should make use of the CV results provided by rpart().
+
+What are the training and test errors of the resulting pruned tree?
+
+```{r}
+# Specify the number of repetitions and folds
+R = 20
+M = 10
+n = nrow(train_data)
+
+# Pre-allocate space for CV results
+cv_errors = numeric(R * M)
+
+set.seed(796)
+
+# Nested loops to repeat the CV R times
+for(i in 1:R) {
+  # Shuffle the data
+  shuffled_data = train_data[sample(nrow(train_data)), ]
+  # Split the data into M folds
+  folds = cut(seq(1, n), breaks = M, labels = FALSE)
+  
+  for(j in 1:M) {
+    # Split the data into training and test for this fold
+    test_indices = which(folds == j, arr.ind = TRUE)
+    cv_train = shuffled_data[-test_indices, ]
+    cv_test = shuffled_data[test_indices, ]
+    # Fit the tree to the CV training data
+    fit = rpart(y ~ ., data = cv_train, method = "class")
+    # Prune the tree using the smallest CV deviance
+    pruned_tree = prune(fit, cp = fit$cptable[which.min(fit$cptable[,"xerror"]), "CP"])
+    # Predict on CV test data
+    pred = predict(pruned_tree, cv_test, type = "class")
+    # Compute error for this fold and repetition
+    cv_errors[(i - 1) * M + j] = mean(pred != cv_test$y)
+  }
+}
+
+# Average CV error over all repetitions
+avg_cv_error = mean(cv_errors)
+# Grow a final tree using all the training data
+final_fit = rpart(y ~ ., data = train_data, method = "class")
+# Prune the tree using the smallest CV deviance
+final_pruned_tree = prune(final_fit, cp = final_fit$cptable[which.min(final_fit$cptable[,"xerror"]), "CP"])
+# Predict on training data
+train_pred = predict(final_pruned_tree, train_data, type = "class")
+# Calculate training error
+train_error = mean(train_pred != train_data$y)
+# Predict on test data
+test_pred = predict(final_pruned_tree, test_data, type = "class")
+# Calculate test error
+test_error = mean(test_pred != test_data$y)
+
+cat("Average CV error:", avg_cv_error, "\n")
+cat("Training error of the pruned tree:", train_error, "\n")
+cat("Test error of the pruned tree:", test_error, "\n")
+```
+
+# Bagging
+
+5. Produce a Bagging model for the training data with 500
+ trees (with nodesize=1) constructed.
+
+What are the three most important variables, in terms of the Gini index, according to Bagging?
+
+Compute both the training and test errors of this Bagging predictor.
+
+Is your test error similar to the OOB estimate? Does Bagging perform better than the pruned tree found in Task 4?
+
+```{r}
+# Train a Bagging model with 500 trees
+set.seed(796)  # Setting seed for reproducibility
+bagging_model <- randomForest(y ~ ., data=train_data, ntree=500, nodesize=1, mtry=ncol(train_data)-1,importance=TRUE)
+round(importance(bagging_model),2)
+
+# Predict on training data
+train_pred <- predict(bagging_model, train_data)
+# Calculate training error
+train_error <- mean(train_pred != train_data$y)
+# Predict on test data
+test_pred <- predict(bagging_model, test_data)
+# Calculate test error
+test_error <- mean(test_pred != test_data$y)
+
+cat("Training error of the Bagging model:", train_error, "\n")
+cat("Test error of the Bagging model:", test_error, "\n")
+oob_error <- bagging_model$err.rate[nrow(bagging_model$err.rate), "OOB"]
+cat("OOB error estimate:", oob_error, "\n")
+```
+
+Most Important Variables: duration, month, job
+
+According to Bagging, the three most important variables, as determined by the Gini index, are duration, month, and job. This means that these three variables are particularly influential in determining the outcome in the model constructed with Bagging.
+
+Training and Test Errors:
+
+The training error of the Bagging model is 0, which indicates that the Bagging model fits the training data perfectly. This isn't particularly surprising, as Bagging tends to perform exceptionally well on training data, especially when constructed with many trees and with nodesize set to 1.
+The test error for the Bagging model is 0.1119. This is an estimation of how the model might perform on new, unseen data.
+
+
+Training error of the Bagging model: 0
+
+Test error of the Bagging model: 0.1119
+
+
+Pruned tree test error(Tsak 4): 0.1187163
+
+
+OOB error estimate: 0.088
+
+
+The test error of the pruned tree (from Task 4) is 0.1187163, which is slightly higher than the Bagging model's test error. This suggests that the Bagging model is somewhat better in terms of generalization to unseen data compared to the pruned tree.
+
+
+The Out-Of-Bag (OOB) error estimate for the Bagging model is 0.088. OOB error is a type of cross-validation error estimate, where each tree in the ensemble is evaluated on the data not used for its training (the out-of-bag samples).
+
+
+Comparing the OOB error with the test error: The OOB error is slightly lower than the test error (0.088 vs. 0.1119). This means the model's performance on the OOB samples was slightly better than on the test set. They are fairly close, which is a good sign, but slight differences can be expected because OOB error is calculated using different subsets of the training data, while the test error is computed using a completely separate test set.
+
+
+# Random Forests
+6. Produce a Random Forest model with 500 trees (with nodesize=1) constructed.
+
+What are the three most important variables, in terms of accuracy, according to the Random Forest model?
+
+Compute both the training and test errors of this Random Forest predictor.
+
+Is your test error similar to the OOB estimate? Do you think the tweak used by Random Forest helps prediction here when compared with the Bagging predictor obtained in Task 5?
+
+```{r}
+# 1. Build the Random Forest model
+rf_model <- randomForest(y ~ ., data=train_data, ntree=500, nodesize=1, importance=TRUE)
+
+# 2. Extract variable importance
+round(importance(rf_model),2)
+
+# 3. Compute the training and test errors
+train_pred <- predict(rf_model, train_data)
+train_error <- mean(train_pred != train_data$y)
+
+test_pred <- predict(rf_model, test_data)
+test_error <- mean(test_pred != test_data$y)
+
+# Print the results
+print(paste("Training error of the Random Forest model:", train_error))
+print(paste("Test error of the Random Forest model:", test_error))
+```
+
+
+The three most important variables, according to the Random Forest model, are `duration`, `poutcome`, and `month`.
+
+
+Training error of the Random Forest model is 0 (which indicates a perfect fit on the training data, as is often the case with complex models like Random Forests when used on the training data they were built on). Test error of the Random Forest model is approximately 0.1071.
+
+
+The test error is fairly close to the OOB error estimate. The OOB error is 0.088, and the test error is 0.1071. The OOB error acts as an internal cross-validation mechanism in Random Forest, providing an estimate of the generalization error. It's encouraging to see that this internal measure is consistent with the external validation (test error), indicating that the model's performance is reliable.
+
+
+Comparing the test error of the Random Forest model (0.1071) with the Bagging model's test error (0.11048) from Task 5, the Random Forest model performed slightly better. This suggests that the tweaks used by the Random Forest (like random feature selection at each split) indeed provided a predictive advantage over simple Bagging in this scenario. The advantage comes from the de-correlation of the trees by using a random subset of features, which adds diversity to the ensemble and generally results in a more robust model.
+
+
+7. Further consider using nodesize=5,10,20, respectively, when building a Random Forest model with 500
+ trees constructed.
+
+Compute both the training and test errors of these Random Forest predictors. Do the training and test errors differ much for a different value of nodesize?
+
+```{r}
+# Pre-allocated storage for errors
+training_errors <- numeric(length(c(5, 10, 20)))
+test_errors <- numeric(length(c(5, 10, 20)))
+
+# Iterate over each nodesize
+for(i in 1:length(c(5, 10, 20))) {
+  # Train a random forest model
+  nodesize_value <- c(5, 10, 20)[i]
+  rf_model <- randomForest(y ~ ., data=train_data, ntree=500, nodesize=nodesize_value)
+  # Training error
+  train_pred <- predict(rf_model, train_data)
+  training_errors[i] <- mean(train_pred != train_data$y)
+  # Test error
+  test_pred <- predict(rf_model, test_data)
+  test_errors[i] <- mean(test_pred != test_data$y)
+}
+
+# Print out the errors
+data.frame(Nodesize=c(5, 10, 20), TrainingError=training_errors, TestError=test_errors)
+```
+
+The training and test errors do differ for different values of nodesize. The difference in training errors is more pronounced and consistent as the nodesize increases, while the test errors show only a slight variation, not following a consistent pattern of increase or decrease.
+
+Considering the test errors, there isn't a substantial difference among the three values of nodesize. While the trees with nodesize of 5 and 10 are slightly more accurate on the training data, their performance on the test data is marginally worse than the tree with nodesize of 20, suggesting a slight overfitting in the more complex models.
+
+# Gradient Boosting
+
+8.Produce a Boosting model, using up to 500 trees, with the number of trees determined via 10-fold cross-validation.
+
+What are the three most important variables, according to Boosting?
+
+Compute both the training and test errors of this Boosting predictor.
+
+In terms of performance, how does this Boosting predictor compare with the other predictors obtained in Tasks 4, 5 and 6?
+
+```{r}
+# Convert target variable to binary 
+bank2 = transform(bank, y2=pmin(as.numeric(y),2)-1)   # requires integer values
+head(bank2)
+set.seed(796)
+
+train_data2 <- bank2[1:1000, ]
+test_data2 <- bank2[1001:nrow(bank2), ]
+
+# Train the boosting model
+boost_model <- gbm(y2 ~ . - y, data=train_data2, distribution="bernoulli", n.trees=500, interaction.depth=3, cv.folds=10)
+
+# Check the most important variables
+(importance_values <- summary(boost_model))
+important_vars <- rownames(importance_values)[1:3]
+
+# Print the top 3 important variables
+print(important_vars)
+
+# Predict using the optimal number of trees (determined by CV)
+optimal_trees <- which.min(boost_model$cv.error)
+
+train_predictions <- predict(boost_model, train_data2, n.trees=optimal_trees, type="response")
+train_predictions_binary <- ifelse(train_predictions > 0.5, 1, 0)
+train_error <- mean(train_data2$y2 != train_predictions_binary)
+
+test_predictions <- predict(boost_model, test_data2, n.trees=optimal_trees, type="response")
+test_predictions_binary <- ifelse(test_predictions > 0.5, 1, 0)
+test_error <- mean(test_data2$y2 != test_predictions_binary)
+
+# Print errors
+print(paste("Training error of the Boosting model:", round(train_error, 4)))
+print(paste("Test error of the Boosting model:", round(test_error, 4)))
+```
+
+The three most important variables, according to Boosting, are:
+duration, month, job
+
+
+The training error of the Boosting model is: 0.069
+
+
+The test error of the Boosting model is: 0.1059
+
+
+Let's recap the test errors from the previous tasks:
+
+
+Pruned tree (Task 4): 0.1187163
+
+
+Bagging (Task 5): 0.1119 
+
+
+Random Forest (Task 6): 0.1071
+
+
+Boosting (Current Task): 0.1059 
+
+
+In terms of test error, the Boosting predictor slightly outperforms the other models, with the Random Forest model being the closest in performance. The Boosting model has the lowest test error (10.59%), making it the best model, at least in terms of test error.
+
+It's interesting to see that while ensemble methods like Boosting, Bagging, and Random Forest generally outperform a single pruned tree, the differences in test errors among these ensemble methods are quite narrow. It highlights the power of ensemble methods but also demonstrates that they may give similar performances on some datasets.
+
+
+9. Demonstrate that Boosting can overfit, using 1, 2, …, 500 trees, by plotting both the training and test error curves in one graph for these Boosting models.
+
+```{r}
+num_trees <- 500
+train_errors <- numeric(num_trees)
+test_errors <- numeric(num_trees)
+
+# Fit the Boosting model with maximum trees
+boost_model <- gbm(y2 ~ .-y, data=train_data2, distribution="bernoulli", n.trees=num_trees, interaction.depth=3)
+
+# Predict on training data for all trees at once
+train_pred_all <- predict(boost_model, newdata=train_data2, n.trees=1:num_trees, type="response")
+dim(train_pred_all) <- c(nrow(train_data2), num_trees)
+train_pred_bin <- ifelse(train_pred_all > 0.5, 1, 0)
+train_errors <- colMeans(train_data2$y2 != train_pred_bin)
+
+# Predict on test data for all trees at once
+test_pred_all <- predict(boost_model, newdata=test_data2, n.trees=1:num_trees, type="response")
+dim(test_pred_all) <- c(nrow(test_data2), num_trees)
+test_pred_bin <- ifelse(test_pred_all > 0.5, 1, 0)
+test_errors <- colMeans(test_data2$y2 != test_pred_bin)
+
+# Plotting
+plot(1:num_trees, train_errors, type="l", col="blue", ylim=c(min(train_errors, test_errors), 0.16), ylab="Error", xlab="Number of Trees", main="Training and Test Errors of Boosting Models")
+lines(1:num_trees, test_errors, col="red")
+legend("topright", legend=c("Training Error", "Test Error"), fill=c("blue", "red"))
+```
+
+As can be seen from the figure, training error keeps shrinking as the number of trees increases. When tree=500, training error is close to 0, indicating that boost model has fully fitted the training model at this time. 
+
+
+However, for the part of test error, with the increase of the number of trees, test error has begun to decline, but after tree > 30, test error rises in fluctuations until it returns to the test error value of the initial tree when tree=500, indicating that the boost model has overfitted after the number of trees has increased
+
+
+# Summary
+10. Write a summary of the entire report.
+
+
+
+**1. Introduction and Data Preparation:**  
+In this lab, we worked with the bank dataset to analyze and predict whether a customer would subscribe to a term deposit. We employed various machine learning techniques to understand and improve our predictions.
+
+**2. Pruned Tree (Task 4):**  
+We started with a simple decision tree and pruned it for optimization. This provided us with a baseline model, resulting in a training error of 0.103 and a test error of 0.1187163.
+
+**3. Bagging (Task 5):**  
+To improve upon the single tree, we used bagging with 500 trees. Bagging effectively reduced variance by averaging multiple decision trees. The most influential variables, according to the Gini index from bagging, were 'duration', 'month', and 'job'. Our Bagging model achieved a training error of 0, but a test error of 0.1119 showed slight overfitting.
+
+**4. Random Forest (Task 6):**  
+Random Forest, an extension of bagging, introduced random feature selection. The top variables by importance were 'duration', 'poutcome', and 'month'. Despite zero training error, the test error was 0.107071854586765. Random forests generally improved accuracy over bagging.
+
+**5. Effect of Nodesize (Task 7):**  
+We further examined the effect of the 'nodesize' parameter in Random Forest. By tweaking the node sizes (5, 10, 20), we observed minimal fluctuation in the test error, suggesting that our model is quite robust to this hyperparameter in the range we tested.
+
+**6. Boosting (Task 8):**  
+Boosting, another ensemble method, adjusts weights on misclassified data points, emphasizing them in subsequent trees. The model identified 'duration', 'month', and 'job' as the most critical features. Boosting displayed superior performance with a training error of 0.069 and a test error of 0.1059.
+
+**7. Overfitting in Boosting (Task 9):**  
+We demonstrated the potential for Boosting to overfit. As the number of trees increased to 500, the training error approached zero, but the test error rose after an optimal point (around 30 trees), signaling overfitting.
+
+**In Conclusion:**  
+Throughout the lab, we delved into different tree-based ensemble methods. Each has its strengths, with Boosting outperforming others in terms of test error. Yet, we also saw its potential pitfalls, such as overfitting when the number of trees is too high. The lab underscored the importance of understanding model complexities, making informed decisions on hyperparameters, and the trade-offs between bias, variance, and interpretability.

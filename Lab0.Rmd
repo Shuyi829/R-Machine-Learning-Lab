@@ -1,0 +1,102 @@
+---
+title: "Lab-00"
+author: "Shuyi Chen"
+date: "2023-07-21"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 999)
+```
+
+## Import
+```{r}
+cars<- read.csv("/Users/chenshuyi/Desktop/STATS769/week 1/car-imports.csv")
+head(cars)
+```
+## Clean
+```{r}
+# Remove commas and convert to numeric for vfd, cif, and Imports.Qty columns
+cars$vfd <- as.numeric(gsub(",", "", cars$vfd))
+cars$cif <- as.numeric(gsub(",", "", cars$cif))
+cars$Imports.Qty <- as.numeric(gsub(",", "", cars$Imports.Qty))
+
+# Convert the Month column to Date format
+cars$Month <- as.Date(paste0(substr(cars$Month, 1, 4), "-", substr(cars$Month, 5, 6), "-01"))
+
+str(cars)
+```
+
+## Explore
+```{r}
+# Frequency of each country in 'cars' data
+country_counts <- table(cars$Country)
+sorted_countries <- sort(country_counts, decreasing = FALSE)
+
+# Set figure size for the first barplot
+par(mfrow = c(1, 1), mar = c(5, 12, 2, 2))
+barplot(sorted_countries, horiz = TRUE, las = 1, main = "Country Barplot", xlab = "Frequency", ylab = "Country",
+        col = "steelblue", cex.names = 0.7)
+
+# Total imported value (vfd) by country
+country_totals <- tapply(cars$vfd, cars$Country, sum)
+sorted_country_totals <- sort(country_totals, decreasing = TRUE)
+sorted_countries <- names(sorted_country_totals)
+
+# Set figure size for the second barplot
+par(mfrow = c(1, 1), mar = c(5, 15, 2, 2))  # Increase the right margin to accommodate longer country names
+barplot(sorted_country_totals, horiz = TRUE, names.arg = sorted_countries,
+        main = "Total Imported Value by Country", xlab = "Total Imported Value (vfd)", ylab = "Country",
+        col = "steelblue", cex.names = 0.7, xlim = c(0, max(sorted_country_totals) * 1.1))
+```
+From the first chart, we can see that the data volume of the United States, the United Kingdom, Japan and other countries is high, which may indicate that these countries have closer automobile trade with New Zealand.
+The data that surprised me was that North Korea's car trade with New Zealand is very high, whereas the car trade with Australia, which is right next door, is not high. 
+
+From the second chart, we can see that the change in the total imported value by our country is logarithmic. Japan's import value is very high, while other countries are relatively low. Since the data in the graph is changing logarithmically, I will propose a log transformation.
+
+## Model
+```{r}
+germany_data <- cars[cars$Country == "Germany", ]
+
+# Scale the 'vfd' column to millions of NZD and store it in a new column 'vfd_scaled'
+germany_data$vfd_scaled <- germany_data$vfd / 1000000
+
+germany_data <- germany_data[order(as.Date(germany_data$Month, format = "%y%m%d")), ]
+set.seed(123)
+
+# Split the data into training and test sets (90% training, 10% test) using random sampling
+train_indices <- sample(1:nrow(germany_data), 0.9 * nrow(germany_data))
+train_data <- germany_data[train_indices, ]
+test_data <- germany_data[-train_indices, ]
+
+# Calculate the mean of 'vfd_scaled' for the training data
+mean_model <- mean(train_data$vfd_scaled)
+
+# Fit a linear model
+lm_model <- lm(vfd_scaled ~ Month, data = train_data)
+
+# Calculate the RMSE
+rmse_mean <- sqrt(mean((test_data$vfd_scaled - mean_model)^2))
+rmse_lm <- sqrt(mean((predict(lm_model, newdata = test_data) - test_data$vfd_scaled)^2))
+
+print(paste("RMSE for mean:", rmse_mean))
+print(paste("RMSE for linear model:", rmse_lm))
+
+# Extract the intercept and slope coefficients from the linear model
+intercept <- lm_model$coefficients["(Intercept)"]
+slope <- lm_model$coefficients["Month"]
+
+# Plot the vfd values over time for Germany
+plot(germany_data$Month, germany_data$vfd_scaled, type = "l", col = "black", xlab = "Month", ylab = "vfd (Millions of NZD)", main = "Model Predictions")
+abline(a = intercept, b = slope, col = "red")
+abline(h = mean_model, col = "blue", lty = 1)
+```
+
+I think the lm model is not very sensible. Because the 'vfd_scaled' values exhibit a downward trend with fluctuating patterns, suggesting that a linear model may not adequately capture the non-linear nature of the data.
+
+## Summary
+
+The 'cars' data was preprocessed, and exploratory data analysis was conducted to visualize imports by country and total imported value. A linear regression model was built to predict 'vfd_scaled' (total imported value in millions of NZD) using 'Month'. The model outperformed the mean model, but its sensibility was limited due to non-linear patterns in the data. Further exploration of alternative modeling techniques is recommended to capture the underlying complexities and improve predictions for imports from Germany over time.

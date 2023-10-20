@@ -1,0 +1,429 @@
+---
+title: "Lab7"
+author: "Shuyi Chen"
+date: "2023-10-06"
+output: html_document
+---
+
+# Introduction
+
+1. In your own words, describe briefly the data and the practical problems that are associated with them.
+```{r}
+zip = read.csv("/course/data/zip/zip.csv")
+subZip <- subset(zip, digit == 4 | digit == 9)
+# head(subZip)
+dim(subZip)
+```
+
+Dimension: The dimension of the data box is 1673x257, which means that there are 1673 observations and 257 variables.
+
+Numbers and pixels: As we can see from the output of head(), each row represents the image data of a number, where the "digit" column represents this number, and the following columns represent the pixel value of the image. These pixel values are presumably normalized or standardized in some way, since they are all between -1 and 1.
+
+Pixel interpretation: Each observation represents a 16x16 pixel image. For this 16x16 image, every "p..." The columns all represent the brightness or color intensity of a pixel on the image.
+
+The data in question consists of pixel values from images, where each pixel can take on up to 256 distinct values. This kind of data presents several practical challenges:
+
+Curse of Dimensionality: Given that images often contain millions to billions of pixels, using pixel values directly as input features introduces an extremely high dimensionality. In such high-dimensional spaces, many algorithms suffer in terms of performance, as data points tend to become equidistant, affecting distance-based methods like K-nearest neighbors.
+
+Computational Costs: Handling high-dimensional data requires more computational resources. Training complex models, especially deep learning ones, on such data can be time-consuming and resource-intensive.
+
+# Variable Selection
+2. Ensemble methods are excellent tools for finding important predictor variables. In aid of Random Forest, find the two most important predictors out of 256 ones, in terms of the Gini index, for classifying between observations with digit=4 and digit=9.
+
+What is the OOB error using all predictors? What is the OOB error if only the two selected predictors are used in the Random Forest model?
+```{r}
+library(randomForest)
+subZip$digit <- as.factor(ifelse(subZip$digit == 4, "digit_4", "digit_9"))
+select_data <- subZip[, c("digit","p9", "p24")]
+```
+
+```{r}
+set.seed(769)  
+# RF model
+(r <- randomForest(digit ~ ., data=subZip,importance=TRUE))
+# OOB error using all predictors
+(all_oob <- r$err.rate[nrow(r$err.rate), "OOB"])
+# Find the two most important variables
+imp <- importance(r)
+(top_2_vars <- rownames(imp)[order(-imp[, "MeanDecreaseGini"])][1:2])
+
+# RF model using only the two most important predictors
+(r2 <- randomForest(digit ~ ., data=subZip[, c(top_2_vars, "digit")]))
+# OOB error using only the two selected predictors
+(top_2_oob <- r2$err.rate[nrow(r2$err.rate), "OOB"])
+```
+
+The two most important predictors for classifying between observations with digit=4 and digit=9 are `p24` and `p9`.
+
+OOB using all predictors: `0.01075912`
+
+OOB using two predictors: `0.08188882`
+
+
+# Clustering
+3. Without using the digit variable, run the K-means algorithm to partition the images into K = 2, 3, ..., 7 clusters, respectively.
+
+Compute the adjusted Rand indices for these clustering results, by comparing them with the true class labels. Does this unsupervised learning method do a good job for the supervised data set here, in particular when K=2?
+```{r}
+library(mclust)
+
+select_data <- subZip[, c("digit","p9", "p24")]
+cluster_data <- subZip[, c("p9", "p24")]
+true_labels <- subZip$digit
+ari = double(6)
+
+# Standardise the data first
+cluster_data = as.data.frame(scale(cluster_data))
+
+# K-means Cluster
+r0 = kmeans(cluster_data, centers=2)            # K = 2
+
+for(k in 2:7){
+  set.seed(769)
+  r = kmeans(cluster_data,centers = k)
+  ari[k-1] = adjustedRandIndex(r$cluster, true_labels)
+}
+
+ari
+
+# Evaluation for K=2
+if (ari[1] > 0.5) {
+  cat("When K=2, the unsupervised learning method does a relatively good job on the supervised dataset.\n")
+} else {
+  cat("When K=2, the unsupervised learning method does not perform well on the supervised dataset.\n")
+}
+
+# Setting up the plotting area for 1 row and 2 columns of plots
+par(mfrow=c(1,2))
+
+# Visualizing the actual distribution of digit
+plot(select_data$p9, select_data$p24, col=ifelse(select_data == "digit_4", "blue", "red"), 
+     xlab="p9", ylab="p24", main="Actual Distribution of Digit", 
+     pch=20, cex=0.5)
+legend("topright", legend=c("digit=4", "digit=9"), fill=c("blue", "red"))
+
+# Visualizing the clusters when K=2
+plot(cluster_data$p9, cluster_data$p24, col=ifelse(r0$cluster == 1, "green", "purple"), 
+     xlab="p9", ylab="p24", main="K-means Clusters (K=2)", 
+     pch=20, cex=0.5)
+legend("topright", legend=c("Cluster 1", "Cluster 2"), fill=c("green", "purple"))
+
+# Reset the plotting area to default
+par(mfrow=c(1,1))
+```
+
+Considering the ARI value of 0.7335104 for K=2, the unsupervised learning method (K-means in this case) does a relatively good job at clustering the supervised dataset when partitioned into two clusters. It's not perfect, but the value suggests that the clusters have a decent level of alignment with the actual digit labels of 4 and 9.
+
+
+4. Redo Task 3, using instead each of the four linkage methods: "complete", "single", "average" and "centroid".
+```{r}
+cex = 0.3
+d=dist(cluster_data)
+
+# Complete Linkage
+par(mfrow=c(3, 2), mar=c(4, 4, 2, 1))
+r=hclust(d)
+# Loop for plotting clustering results from K=2 to K=7
+for(k in 2:7) {
+  plot(select_data$p9, select_data$p24, col=cutree(r, k) + 2, 
+       main=paste0("K = ", k), pch=20, cex=0.5, xlab="p9", ylab="p24")
+}
+
+# Single Linkage
+par(mfrow=c(3, 2), mar=c(4, 4, 2, 1))
+r = hclust(d, method="single")               # single linkage
+for(k in 2:7) 
+{plot(select_data$p9, select_data$p24, col=cutree(r, k) + 2, 
+       main=paste0("K = ", k), pch=20, cex=0.5, xlab="p9", ylab="p24")
+}
+
+# Average Linkage
+par(mfrow=c(3, 2), mar=c(4, 4, 2, 1))
+r = hclust(d, method="average")              
+for(k in 2:7) 
+{plot(select_data$p9, select_data$p24, col=cutree(r, k) + 2, 
+       main=paste0("K = ", k), pch=20, cex=0.5, xlab="p9", ylab="p24")
+}
+
+# Centroid Linkage
+par(mfrow=c(3, 2), mar=c(4, 4, 2, 1))
+r = hclust(d, method="centroid")              
+for(k in 2:7) 
+{plot(select_data$p9, select_data$p24, col=cutree(r, k) + 2, 
+       main=paste0("K = ", k), pch=20, cex=0.5, xlab="p9", ylab="p24")
+}
+```
+
+5. Produce a scatter plot for each of the following 6 partitioning results with 2 classes/clusters:
+
+class labels,K-means,complete linkage,single linkage,average linkage,centroid linkage
+
+Observations of different classes or clusters need to be shown in different colours and point types.
+
+Do you think the ARI values make sense?
+```{r}
+par(mfrow=c(3, 2), mar=c(4, 4, 2, 1))
+
+# Visualizing the actual distribution of digit
+plot(select_data$p9, select_data$p24, 
+     col=ifelse(select_data$digit == "digit_4", "blue", "red"), 
+     pch=ifelse(select_data$digit == "digit_4", 20, 17),  # use circle for digit_4 and triangle for digit_9
+     xlab="p9", ylab="p24", main="Actual Distribution of Digit", 
+     cex=0.5)
+legend("topright", legend=c("digit=4", "digit=9"), pch=c(20, 17), col=c("blue", "red"))
+
+# Visualizing the K-means
+plot(cluster_data$p9, cluster_data$p24, 
+     col=ifelse(r0$cluster == 1, "green", "purple"), 
+     pch=ifelse(r0$cluster == 1, 20, 17),  # use circle for cluster 1 and triangle for cluster 2
+     xlab="p9", ylab="p24", main="K-means Clusters (K=2)", 
+     cex=0.5)
+legend("topright", legend=c("Cluster 1", "Cluster 2"), pch=c(20, 17), col=c("green", "purple"))
+
+# Visualizing the 4 methods of Hierachical Clustering
+# Define linkage methods
+linkage_methods = c("complete", "single", "average", "centroid")
+# Loop over each linkage method
+for (method in linkage_methods) {
+  r = hclust(d, method=method)
+  cluster_labels = cutree(r, 2)
+  plot(select_data$p9, select_data$p24, 
+       col=ifelse(cluster_labels == 1, "green", "purple"),
+       pch=ifelse(cluster_labels == 1, 20, 17),  # change shape based on cluster number
+       main=paste0(method, " method"), cex=0.5, xlab="p9", ylab="p24")
+  # Add a legend to the plot
+  legend("topright", legend=c("Cluster 1", "Cluster 2"), pch=c(20, 17), col=c("green", "purple"))}
+```
+
+We calculated that the ari value under K-means method is 0.7335104. Although this value does not reach 1 (perfect match), it is a relatively high ARI value, indicating that this clustering method has a good correspondence with the real class label in the partition.
+Then through comparing 6 plots, we can see that the cluster obtained by k-means method is similar to the real two kinds of digits, while the clusters obtained by other methods are not so similar, which indicates that the ari value makes sense.
+
+# Support Vector Machines
+6. Train support vector machines using the linear kernel, for cost = 0.001, 0.01, 0.1, 1, 10, 100, respectively.
+
+Produce a classification plot for each value of cost, which also shows the decision boundary. You can either use the plot function provided in the e1071 package or write your own code.
+
+What is the effect of cost here, on the decision boundary and the number of support vectors?
+```{r}
+library(e1071)
+
+# Split data into training and testing sets
+train_data <- select_data[1:1000,]
+test_data <- select_data[1001:nrow(select_data),]
+
+attach(train_data)
+
+# Define the cost values
+costs <- c(0.001, 0.01, 0.1, 1, 10, 100)
+
+# Loop through each cost value
+for (cost in costs) {
+  # Train SVM with the current cost value
+  formula = digit ~ p9 + p24
+  r = svm(formula, data=train_data, kernel="linear", scale=FALSE, cost=cost)
+  # Print SVM summary
+  cat("Summary for cost =", cost, ":\n")
+  print(summary(r))
+  # Visualize the results
+  col = as.numeric(train_data$digit) + 1
+  plot(train_data$p9, train_data$p24, col=col, main=paste("Digit Data with cost =", cost), asp=1)
+  (beta = coef(r))
+  # Add decision boundary
+  abline(-beta[1]/beta[2], -beta[-length(beta)]/beta[2], lwd=2)
+  # Highlight the support vectors
+  (s = r$index)
+  points(train_data$p9[s], train_data$p24[s], pch=20, cex=0.8, col=col[s])
+  # Pause to let user examine each plot
+  readline(prompt="Press [enter] to continue")
+}
+```
+
+Effect on the Number of Support Vectors:
+
+
+Cost = 0.001: There are 798 support vectors.
+Cost = 0.01: The number drops significantly to 286 support vectors.
+Cost = 0.1: Further reduction to 195 support vectors.
+Cost = 1: Reduction continues to 177 support vectors.
+Cost = 10: Slight reduction to 175 support vectors.
+Cost = 100: Very minimal reduction to 174 support vectors.
+
+
+As the cost value increases, the number of support vectors decreases. This implies that with a higher cost, the SVM becomes stricter about classifying every training example correctly, which can lead to a more complex decision boundary that closely follows the data. Conversely, a smaller cost value is more lenient about misclassification, leading to a simpler, more general decision boundary. However, as the cost continues to rise, the reduction in the number of support vectors becomes marginal, suggesting a point of diminishing returns.
+
+
+Effect on the Decision Boundary:
+
+
+A lower cost (like 0.001) will tend to produce smoother, more general decision boundaries since it's less strict about misclassifications.
+As cost increases (like 0.01, 0.1), the decision boundary will tend to become more intricate as the SVM tries harder to classify every training example correctly.
+For very high values of cost (like 10, 100), the decision boundary might closely follow the training data, potentially capturing noise and leading to overfitting.
+
+
+7. Compute the training and test errors (misclassification rates) for each of the support vector machines found in Task 6.
+
+You may combine this task with Task 6, or save in Task 6 all of the trained support vector machines and use them in this task for computing errors.
+
+What is the general trend of the training errors and test errors, with respect to the value of cost?
+
+What is the best value for cost, according to test errors?
+```{r}
+# Initialize the cost values
+training_errors <- numeric(length(costs))
+test_errors <- numeric(length(costs))
+
+formula = digit ~ p9 + p24
+
+# Loop through each cost value
+for (i in 1:length(costs)) {
+  cost <- costs[i]
+  
+  # Train SVM
+  r = svm(formula, data=train_data, kernel="linear", cost=cost, scale=FALSE)
+  
+  # Predict and compute training error
+  train_predictions <- predict(r, train_data)
+  training_errors[i] <- mean(train_predictions != train_data$digit)
+  
+  # Predict and compute test error
+  test_predictions <- predict(r, test_data)
+  test_errors[i] <- mean(test_predictions != test_data$digit)
+}
+
+# Print the errors
+data.frame(Cost = costs, TrainingError = training_errors, TestError = test_errors)
+```
+
+General Trend of Training and Test Errors with Respect to Cost:
+
+Training Error: The training error seems to be at its lowest for the cost of 0.1. As the cost increases beyond that (1, 10, 100), the training error slightly increases. This could indicate that as we increase the penalty (cost) for misclassifications, the model tends to overfit, hence a slightly higher training error.
+
+Test Error: The test error is at its lowest for the cost of 0.01. Beyond that value, the test error starts to increase, indicating potential overfitting where the model might be fitting noise or outliers in the training data, which does not generalize well to the test data.
+
+Best Value for Cost According to Test Errors:
+
+The best value for cost, based on the test errors, is `0.01` since it corresponds to the lowest test error of `0.07132244`.
+
+
+
+8. Consider using radial kernels for support vector machines. With cost=1 held fixed, train support vector machines, for gamma = 0.001, 0.01, 0.1, 1, 10, 100, respectively.
+
+Produce a classification plot for each value of gamma, which also shows the decision boundary.
+
+What is the effect of gamma here, on the decision boundary and the number of support vectors?
+
+Compute the training and test errors for each of the support vector machines built. What is the optimal value for gamma here, according to test errors?
+
+Do you think using radial kernels helps here, as compared with the linear kernel?
+
+```{r}
+# Define the range of gamma values
+gammas <- c(0.001, 0.01, 0.1, 1, 10, 100)
+svm_models <- list()
+train_errors <- numeric(length(gammas))
+test_errors <- numeric(length(gammas))
+
+# Loop through each gamma value
+for (i in 1:length(gammas)) {
+    gamma_val <- gammas[i]
+    # Train SVM with the current gamma value
+    formula = digit ~ p9 + p24
+    r = svm(formula, data=train_data, kernel="radial", cost=1, gamma=gamma_val, scale=FALSE)
+    # Save the model
+    svm_models[[i]] <- r
+    # Print SVM summary
+    cat("Summary for gamma =", gamma_val, ":\n")
+    print(summary(r))
+    # Visualize the results
+    col = as.numeric(train_data$digit) + 1
+    plot(train_data$p9, train_data$p24, col=col, main=paste("Digit Data with gamma =", gamma_val), asp=1)
+    # Visualization of decision boundary for radial kernel
+    # Create a grid
+    grid_points <- expand.grid(p9=seq(min(train_data$p9), max(train_data$p9), length.out=100),p24=seq(min(train_data$p24), max(train_data$p24), length.out=100))
+    pred_grid <- predict(r, grid_points)
+    contour(seq(min(train_data$p9), max(train_data$p9), length.out=100),
+            seq(min(train_data$p24), max(train_data$p24), length.out=100),
+            matrix(as.numeric(pred_grid), 100, 100), levels=c(1.5),drawlabels=FALSE,add=TRUE)
+    # Highlight the support vectors
+    (s = r$index)
+    points(train_data$p9[s], train_data$p24[s], pch=20, cex=0.8, col=col[s])
+    # Compute training error for this gamma value
+    train_pred <- predict(r, train_data)
+    train_errors[i] <- sum(train_pred != train_data$digit) / length(train_pred)
+    # Compute test error for this gamma value
+    test_pred <- predict(r, test_data)
+    test_errors[i] <- sum(test_pred != test_data$digit) / length(test_pred)
+}
+
+# Determine the optimal gamma based on test error
+test_errors
+optimal_gamma <- gammas[which.min(test_errors)]
+cat("Optimal gamma is:", optimal_gamma)
+```
+
+Effect on the Number of Support Vectors: As gamma increases from 0.001 to 1, the number of support vectors decreases. This indicates that the model is becoming more confident about the margins between the two classes and therefore requires fewer support vectors to define the decision boundary. However, further increasing gamma to 10 or 100 results in an increase in the number of support vectors. This may suggest that the model is starting to overfit to the training data with higher gamma values, leading to a more irregular and potentially over-complex decision boundary.
+
+
+Effect on the Decision Boundary: Higher gamma values tend to produce more complex, non-linear decision boundaries, while lower gamma values result in smoother, broader decision boundaries.
+
+
+The optimal value for gamma based on the test error is `1`, whose test error is 0.06983655.
+
+The best value for cost based on the test error is `0.01`, whose test error is 0.07132244.
+
+Compared with the linear kernel, the test error in radial kernel is smaller, meaning using radial kernel helps.
+
+
+9. Now consider using all 256 predictors. Find the best values for cost and gamma based on 10-fold cross-validation (just one run) from the train set.
+
+Compute both the training and test errors of the best model found.
+
+```{r eval=FALSE}
+# Split data into training and testing sets
+train_data <- subZip[1:1000,]
+test_data <- subZip[1001:nrow(subZip),]
+
+costs <- c(0.001, 0.01, 0.1, 1, 10, 100)
+gammas <- c(0.001, 0.01, 0.1, 1, 10, 100)
+
+# Generate formula to include all 256 predictors
+predictors <- paste("p", 1:256, sep="", collapse="+")
+formula <- as.formula(paste("digit ~", predictors))
+
+# Use 10-fold cross-validation to find the best cost and gamma
+tune_result <- tune(svm, train.x=train_data[,-1], train.y=train_data[,1],
+                    kernel="radial", scale=FALSE,
+                    ranges=list(cost=costs, gamma=gammas),
+                    tunecontrol=tune.control(cross=10))
+
+# Display the best parameters found
+print(tune_result$best.parameters)
+
+# Train SVM model using the best parameters found
+best_model <- svm(formula, data=train_data, kernel="radial", scale=FALSE,
+                 cost=tune_result$best.parameters$cost,
+                 gamma=tune_result$best.parameters$gamma)
+
+# Compute training error
+train_pred <- predict(best_model, train_data)
+train_error <- sum(train_pred != train_data[,1]) / length(train_pred)
+cat("Training error:", train_error, "\n")
+
+# Compute test error
+test_pred <- predict(best_model, test_data)
+test_error <- sum(test_pred != test_data[,1]) / length(test_pred)
+cat("Test error:", test_error, "\n")
+```
+
+The best model: cost=10, gamma=0.01 
+
+Training error: 0
+
+Test error: 0.01188707
+
+# Summary
+10. Write a summary of the entire report.
+
+The dataset, constituting images of digits, was leveraged to classify between the digits 4 and 9. Various methods, including Random Forests, K-means clustering, and SVMs, were applied. While the initial approach considered all 256 predictors, zooming into the two most significant ones (p24 and p9) offered insights into dimensionality reduction. The SVM analysis, especially with varying cost and gamma, provided a comprehensive understanding of their impact on model performance.
+
+In summary, while models using all predictors were more accurate, they demanded higher computational power. On the other hand, models with limited predictors were computationally efficient but less precise. The experiment underscores the perpetual trade-off between model accuracy and computational efficiency in machine learning and offers a deep dive into the behavior and performance of SVMs on image datasets.
